@@ -464,6 +464,22 @@ function generateAgreementPdf(project){
 
 let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, onboardingStep: null };
 
+// Remembers which project this browser is currently looking at, so a reload
+// (or coming back later) reopens the same project instead of asking for the
+// access code again. This is separate from the project data itself, which
+// lives in Supabase (see window.storage above) — this is just "who is this
+// browser currently signed in as", which only needs to live on this device.
+const CLIENT_SESSION_KEY = "zynasty-client-code";
+function saveClientSession(code){
+  try{ localStorage.setItem(CLIENT_SESSION_KEY, code); }catch(e){ console.error("Could not save client session", e); }
+}
+function clearClientSession(){
+  try{ localStorage.removeItem(CLIENT_SESSION_KEY); }catch(e){ console.error("Could not clear client session", e); }
+}
+function loadClientSession(){
+  try{ return localStorage.getItem(CLIENT_SESSION_KEY) || ""; }catch(e){ return ""; }
+}
+
 async function loadProjects(){
   try{
     const res = await window.storage.get(STORAGE_KEY, true);
@@ -861,42 +877,51 @@ function renderClient(){
     </div>`;
 }
 
+// Looks up a project by access code, updates state/render, and — on success —
+// remembers the code in this browser so a reload reopens the same project.
+async function lookupProjectByCode(code){
+  state.clientCode = code;
+  const normalize = (s)=> (s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  let match = state.projects.find(p=>normalize(p.accessCode) === normalize(code));
+  if(!match){
+    // The project list may be stale or missing if a prior sync attempt
+    // failed (e.g. right after switching apps, before the network was
+    // ready). Do one fresh reload before concluding it's really not found.
+    await loadProjects();
+    match = state.projects.find(p=>normalize(p.accessCode) === normalize(code));
+  }
+  if(match){
+    state.clientResult = match;
+    state.clientError = "";
+    state.clientQuotationPdf = null;
+    state.onboardingStep = null;
+    saveClientSession(code);
+    render();
+    try{
+      const res = await window.storage.get("quotation-pdf:" + match.id, true);
+      state.clientQuotationPdf = res && res.value ? res.value : null;
+    }catch(e){
+      state.clientQuotationPdf = null;
+    }
+    render();
+    return true;
+  } else {
+    state.clientError = "We couldn't find a project with that code. Please check with your designer.";
+    render();
+    return false;
+  }
+}
+
 function attachClientHandlers(){
   const back = document.getElementById("backBtn");
-  if(back) back.onclick = ()=>{ state.clientResult=null; state.clientCode=""; state.clientError=""; state.clientQuotationPdf=null; state.onboardingStep=null; render(); };
+  if(back) back.onclick = ()=>{ state.clientResult=null; state.clientCode=""; state.clientError=""; state.clientQuotationPdf=null; state.onboardingStep=null; clearClientSession(); render(); };
 
   const btn = document.getElementById("lookupBtn");
   const input = document.getElementById("codeInput");
   if(btn){
     const doLookup = async ()=>{
       const code = (input.value||"").trim().toUpperCase();
-      state.clientCode = code;
-      const normalize = (s)=> (s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      let match = state.projects.find(p=>normalize(p.accessCode) === normalize(code));
-      if(!match){
-        // The project list may be stale or missing if a prior sync attempt
-        // failed (e.g. right after switching apps, before the network was
-        // ready). Do one fresh reload before concluding it's really not found.
-        await loadProjects();
-        match = state.projects.find(p=>normalize(p.accessCode) === normalize(code));
-      }
-      if(match){
-        state.clientResult = match;
-        state.clientError = "";
-        state.clientQuotationPdf = null;
-        state.onboardingStep = null;
-        render();
-        try{
-          const res = await window.storage.get("quotation-pdf:" + match.id, true);
-          state.clientQuotationPdf = res && res.value ? res.value : null;
-        }catch(e){
-          state.clientQuotationPdf = null;
-        }
-        render();
-      } else {
-        state.clientError = "We couldn't find a project with that code. Please check with your designer.";
-        render();
-      }
+      await lookupProjectByCode(code);
     };
     btn.onclick = doLookup;
     input.addEventListener("keydown",(e)=>{ if(e.key==="Enter") doLookup(); });
@@ -1358,7 +1383,14 @@ async function handleCashfreeReturn(){
   }
 }
 
-loadProjects().then(handleCashfreeReturn);
+// On load: fetch projects, then reopen whichever project this browser was
+// last signed in to (if any), before checking for a Cashfree return — a
+// completed payment redirect should win if both happen to apply at once.
+loadProjects().then(async ()=>{
+  const savedCode = loadClientSession();
+  if(savedCode) await lookupProjectByCode(savedCode);
+  await handleCashfreeReturn();
+});
 </script>
 </body>
 </html>
