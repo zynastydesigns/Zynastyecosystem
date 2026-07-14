@@ -181,7 +181,7 @@
         <div class="illo-eyebrow">Zynasty Design</div>
         <div class="illo-welcome">Welcome<br>back to the studio</div>
       </div>
-      <div class="illo-foot">Prototype build · <b>not</b> connected to production client data</div>
+      <div class="illo-foot">Connected to live Studio Portal data</div>
     </div>
 
     <div class="login-panel">
@@ -206,7 +206,7 @@
           <div class="error-msg" id="error-msg"></div>
           <button type="submit" class="submit">Login</button>
         </form>
-        <div class="hint">Prototype: any valid email + a password (<b>6+ characters</b>) signs you in.</div>
+        <div class="hint">Note: sign-in isn't yet connected to a staff directory — anyone with this link and a valid-format email/password can enter. Ask Claude to wire up real staff accounts when you're ready.</div>
       </div>
     </div>
 
@@ -230,7 +230,7 @@
       <div class="topbar">
         <div>
           <h1>Overview</h1>
-          <div class="welcome">Here's what's moving across the studio pipeline today.</div>
+          <div class="welcome">Live from Studio Portal data. <span id="data-status" style="color:#B1503D;"></span></div>
         </div>
         <div class="who">
           <div class="avatar" id="avatar-initial">Z</div>
@@ -241,23 +241,23 @@
       <div class="stats">
         <div class="stat-card">
           <div class="label">Active Leads</div>
-          <div class="value mono">14</div>
-          <div class="delta">+3 this week</div>
+          <div class="value mono" id="stat-active-leads">—</div>
+          <div class="delta">in "In Discussion" stage</div>
         </div>
         <div class="stat-card">
           <div class="label">Projects In Progress</div>
-          <div class="value mono">7</div>
-          <div class="delta">2 awaiting KYC</div>
+          <div class="value mono" id="stat-in-progress">—</div>
+          <div class="delta">onboarding through styling</div>
         </div>
         <div class="stat-card">
           <div class="label">Quotations Sent</div>
-          <div class="value mono">9</div>
-          <div class="delta">4 pending reply</div>
+          <div class="value mono" id="stat-quotations">—</div>
+          <div class="delta">have a saved quotation</div>
         </div>
         <div class="stat-card">
           <div class="label">Pipeline Value</div>
-          <div class="value mono">₹38.2L</div>
-          <div class="delta">across open projects</div>
+          <div class="value mono" id="stat-pipeline">—</div>
+          <div class="delta">open, non-lost projects</div>
         </div>
       </div>
 
@@ -267,31 +267,8 @@
           <thead>
             <tr><th>Client</th><th>Stage</th><th>Last Update</th><th style="text-align:right">Value</th></tr>
           </thead>
-          <tbody>
-            <tr>
-              <td>Mrs. Anjali Rao</td>
-              <td><span class="swatch-chip"><span class="sq" style="background:#C9A24B"></span>Quoted</span></td>
-              <td>2 days ago</td>
-              <td class="amt" style="text-align:right">₹6,40,000</td>
-            </tr>
-            <tr>
-              <td>Mr. Devraj Shah</td>
-              <td><span class="swatch-chip"><span class="sq" style="background:#3E6B63"></span>In Discussion</span></td>
-              <td>Today</td>
-              <td class="amt" style="text-align:right">₹4,10,000</td>
-            </tr>
-            <tr>
-              <td>Ms. Priya Menon</td>
-              <td><span class="swatch-chip"><span class="sq" style="background:#1F2C4D"></span>Won</span></td>
-              <td>1 week ago</td>
-              <td class="amt" style="text-align:right">₹9,85,000</td>
-            </tr>
-            <tr>
-              <td>Dr. Kabir Malhotra</td>
-              <td><span class="swatch-chip"><span class="sq" style="background:#B1503D"></span>Follow-up Due</span></td>
-              <td>3 days ago</td>
-              <td class="amt" style="text-align:right">₹2,75,000</td>
-            </tr>
+          <tbody id="activity-body">
+            <tr><td colspan="4" style="text-align:center;color:#8a8878;padding:28px 12px;">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -310,42 +287,85 @@
   const whoEmail = document.getElementById('who-email');
   const avatarInitial = document.getElementById('avatar-initial');
   const logoutBtn = document.getElementById('logout-btn');
+  const dataStatus = document.getElementById('data-status');
 
-  // Session persistence via localStorage. This is a real deployed site
-  // (Cloudflare Pages), not a Claude Artifact, so window.storage isn't
-  // available here — localStorage is the correct tool: it's actual browser
-  // storage and survives page reloads, unlike an in-memory JS variable.
+  // ---------- Session: persists across reloads, expires after ~30s of an
+  // inactive tab (not focused / not visible), rather than on every reload. ----------
   const SESSION_KEY = 'zynasty-crm-session';
+  const LAST_ACTIVE_KEY = 'zynasty-crm-last-active';
+  const IDLE_TIMEOUT_MS = 30000;
 
-  async function saveSession(email){
-    try{
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ email }));
-    }catch(e){
-      console.error('Could not save session:', e);
-    }
+  function markActive(){
+    try{ localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now())); }catch(e){}
   }
-  async function loadSession(){
+  function idleGapMs(){
     try{
-      const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    }catch(e){
-      console.error('Could not load session:', e);
-      return null;
-    }
+      const last = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || '0', 10);
+      if(!last) return Infinity;
+      return Date.now() - last;
+    }catch(e){ return Infinity; }
+  }
+  async function saveSession(email){
+    try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ email })); }catch(e){ console.error('Could not save session', e); }
+    markActive();
   }
   async function clearSession(){
     try{
       localStorage.removeItem(SESSION_KEY);
-    }catch(e){
-      console.error('Could not clear session:', e);
+      localStorage.removeItem(LAST_ACTIVE_KEY);
+    }catch(e){ console.error('Could not clear session', e); }
+  }
+  async function loadSession(){
+    try{
+      const raw = localStorage.getItem(SESSION_KEY);
+      if(!raw) return null;
+      if(idleGapMs() > IDLE_TIMEOUT_MS){
+        await clearSession();
+        return null;
+      }
+      return JSON.parse(raw);
+    }catch(e){ return null; }
+  }
+
+  let heartbeat = null;
+  function startHeartbeat(){
+    stopHeartbeat();
+    markActive();
+    heartbeat = setInterval(()=>{
+      if(document.visibilityState === 'visible' && document.hasFocus()) markActive();
+    }, 5000);
+  }
+  function stopHeartbeat(){
+    if(heartbeat){ clearInterval(heartbeat); heartbeat = null; }
+  }
+
+  async function checkIdleTimeout(){
+    if(dashView.style.display !== 'block') return;
+    if(idleGapMs() > IDLE_TIMEOUT_MS){
+      await clearSession();
+      stopHeartbeat();
+      stopPolling();
+      showLogin();
     }
   }
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden){
+      checkIdleTimeout();
+      if(dashView.style.display === 'block'){ markActive(); refreshDashboardData(); }
+    }
+  });
+  window.addEventListener('focus', function(){
+    checkIdleTimeout();
+    if(dashView.style.display === 'block'){ markActive(); }
+  });
 
   function showDashboard(email){
     whoEmail.textContent = email;
     avatarInitial.textContent = email.trim()[0].toUpperCase();
     loginView.style.display = 'none';
     dashView.style.display = 'block';
+    startHeartbeat();
+    startPolling();
   }
   function showLogin(){
     dashView.style.display = 'none';
@@ -378,8 +398,139 @@
 
   logoutBtn.addEventListener('click', async function(){
     await clearSession();
+    stopHeartbeat();
+    stopPolling();
     showLogin();
   });
+
+  // ---------- Live data: same Supabase store used by index.html and
+  // studio-portal.html, so this reflects real projects the moment Studio
+  // saves them — read-only from here. ----------
+  const SUPABASE_URL = "https://quemdexciitxrmtbicae.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1ZW1kZXhjaWl0eHJtdGJpY2FlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4NzQ3NDcsImV4cCI6MjA5OTQ1MDc0N30.NNePZH__2lN9vx5RtnLFvL8rWMn6ifP2HiPfe6Kh2eE";
+  const SB_TABLE = "zynasty_storage";
+  const SB_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY };
+  const PROJECTS_KEY = "projects";
+
+  // Same stage list/colors as studio-portal.html and index.html, so a
+  // project's status reads the same color everywhere in the ecosystem.
+  const STAGES = ["In Discussion","Onboarding","Design Development","In Progress","Install & Styling","Completed"];
+  const STAGE_COLORS = ["#B5654A","#C08A4E","#A9814F","#8C8F5E","#74845F","#5F7A56"];
+  const LOST_COLOR = "#A33D3D";
+
+  function formatClientName(p){
+    const salutation = (p && p.clientSalutation || "").trim();
+    const name = (p && p.clientName || "").trim();
+    return salutation ? salutation + " " + name : name;
+  }
+  function fmtMoney(v){
+    if (v === "" || v === null || v === undefined) return "—";
+    const n = Number(v);
+    if (isNaN(n)) return "—";
+    return "₹" + n.toLocaleString();
+  }
+  function escapeHtml(str){
+    return (str||"").toString().replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+  }
+  function timeAgo(iso){
+    if(!iso) return null;
+    const then = new Date(iso).getTime();
+    if(isNaN(then)) return null;
+    const mins = Math.floor((Date.now() - then) / 60000);
+    if(mins < 1) return "Just now";
+    if(mins < 60) return mins + (mins===1 ? " minute ago" : " minutes ago");
+    const hrs = Math.floor(mins/60);
+    if(hrs < 24) return hrs + (hrs===1 ? " hour ago" : " hours ago");
+    const days = Math.floor(hrs/24);
+    if(days < 7) return days + (days===1 ? " day ago" : " days ago");
+    const weeks = Math.floor(days/7);
+    if(weeks < 5) return weeks + (weeks===1 ? " week ago" : " weeks ago");
+    return new Date(iso).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
+  }
+
+  async function fetchProjects(){
+    try{
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/${SB_TABLE}?key=eq.${encodeURIComponent(PROJECTS_KEY)}&select=value`,
+        { headers: SB_HEADERS }
+      );
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const rows = await res.json();
+      if(!rows || !rows.length) return [];
+      return JSON.parse(rows[0].value || "[]");
+    }catch(e){
+      console.error("Could not fetch projects from Studio Portal data", e);
+      return null; // null = fetch failed; [] = fetched fine, just empty
+    }
+  }
+
+  function computeStats(projects){
+    const active = projects.filter(p => p.status === "In Discussion").length;
+    const inProgress = projects.filter(p =>
+      ["Onboarding","Design Development","In Progress","Install & Styling"].includes(p.status)
+    ).length;
+    const quotationsSent = projects.filter(p => !!p.quotationSavedAt).length;
+    const pipelineValue = projects
+      .filter(p => p.status !== "Lost" && p.status !== "Completed")
+      .reduce((sum, p) => sum + (Number(p.contractValue) || 0), 0);
+    return { active, inProgress, quotationsSent, pipelineValue };
+  }
+
+  function renderStats(stats){
+    document.getElementById('stat-active-leads').textContent = stats.active;
+    document.getElementById('stat-in-progress').textContent = stats.inProgress;
+    document.getElementById('stat-quotations').textContent = stats.quotationsSent;
+    document.getElementById('stat-pipeline').textContent = fmtMoney(stats.pipelineValue);
+  }
+
+  function renderActivity(projects){
+    const tbody = document.getElementById('activity-body');
+    if(!projects.length){
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#8a8878;padding:28px 12px;">No projects yet — add one in the Studio Portal.</td></tr>';
+      return;
+    }
+    const sorted = [...projects].sort((a, b)=>{
+      const at = a.quotationSavedAt ? new Date(a.quotationSavedAt).getTime() : 0;
+      const bt = b.quotationSavedAt ? new Date(b.quotationSavedAt).getTime() : 0;
+      return bt - at;
+    }).slice(0, 8);
+
+    tbody.innerHTML = sorted.map(p=>{
+      const isLost = p.status === "Lost";
+      const idx = STAGES.indexOf(p.status);
+      const color = isLost ? LOST_COLOR : (idx > -1 ? STAGE_COLORS[idx] : "#8a8878");
+      const label = isLost ? "Lost" : (p.status || "—");
+      const updated = timeAgo(p.quotationSavedAt) || "No quotation yet";
+      const who = formatClientName(p) || p.projectName || "Untitled project";
+      return `<tr>
+        <td>${escapeHtml(who)}</td>
+        <td><span class="swatch-chip"><span class="sq" style="background:${color}"></span>${escapeHtml(label)}</span></td>
+        <td>${escapeHtml(updated)}</td>
+        <td class="amt" style="text-align:right">${fmtMoney(p.contractValue)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function refreshDashboardData(){
+    const projects = await fetchProjects();
+    if(projects === null){
+      if(dataStatus) dataStatus.textContent = "Couldn't reach Studio Portal data just now — showing the last figures loaded.";
+      return;
+    }
+    if(dataStatus) dataStatus.textContent = "";
+    renderStats(computeStats(projects));
+    renderActivity(projects);
+  }
+
+  let pollTimer = null;
+  function startPolling(){
+    stopPolling();
+    refreshDashboardData();
+    pollTimer = setInterval(()=>{ if(!document.hidden) refreshDashboardData(); }, 8000);
+  }
+  function stopPolling(){
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  }
 
   (async function init(){
     const session = await loadSession();
