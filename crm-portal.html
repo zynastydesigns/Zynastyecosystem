@@ -9,76 +9,110 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink:#24231F; --ink-soft:#3A382F; --ivory:#F1EDE3; --ivory-dim:#E7E1D2;
-    --card:#FBF9F4; --brass:#A9812F; --brass-soft:#D8C186; --teal:#375E56;
-    --clay:#B1503D; --line:#DAD3C0; --shadow: 0 12px 30px rgba(36,35,31,0.12);
+    --ink:#1B2438;
+    --ink-soft:#2C3752;
+    --navy:#1F2C4D;
+    --navy-deep:#141B30;
+    --gold:#C9A24B;
+    --ivory:#FDFBF6;
+    --line:#E7E2D4;
+    --teal:#3E6B63;
+    --clay:#B1503D;
+    --shadow: 0 20px 50px rgba(20,27,48,0.16);
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:'Inter',sans-serif;background:var(--ivory);color:var(--ink);}
   h1,h2,h3,.brand{font-family:'Fraunces',serif;}
   .mono{font-family:'IBM Plex Mono',monospace;}
 
-  #login-view{display:flex;min-height:100vh;}
-  .login-brand{flex:1;background:var(--ink);color:var(--ivory);display:flex;flex-direction:column;justify-content:space-between;padding:56px;overflow:hidden;}
-  .login-brand .brand{font-size:28px;font-style:italic;font-weight:500;letter-spacing:0.02em;}
-  .login-brand .tagline{font-size:15px;color:var(--brass-soft);margin-top:10px;max-width:320px;line-height:1.5;}
-  .swatch-strip{display:flex;gap:10px;margin-top:auto;}
-  .swatch{width:38px;height:52px;border-radius:3px;box-shadow:0 4px 10px rgba(0,0,0,0.25);}
-  .login-brand .foot{font-size:12px;color:#8b8a7f;margin-top:16px;}
+  /* ---------- LOGIN ---------- */
+  #login-view{
+    display:flex;min-height:100vh;background:var(--ivory);
+    align-items:center;justify-content:center;padding:32px;
+  }
+  .login-frame{
+    display:flex;width:100%;max-width:960px;min-height:560px;
+    border-radius:18px;overflow:hidden;box-shadow:var(--shadow);
+    background:#fff;
+  }
 
-  .login-panel{flex:1;display:flex;align-items:center;justify-content:center;padding:40px;}
-  .login-card{width:100%;max-width:380px;}
-  .login-card .eyebrow{font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--teal);font-weight:600;margin-bottom:10px;}
-  .login-card h1{font-size:30px;margin:0 0 8px 0;font-weight:600;}
-  .login-card p.sub{margin:0 0 32px 0;color:#6b6a5e;font-size:14.5px;}
-  label{display:block;font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;}
-  .field{margin-bottom:18px;}
+  /* Illustrated side */
+  .login-illustration{
+    flex:1.1;position:relative;background:radial-gradient(120% 140% at 15% 10%, #263457 0%, var(--navy) 45%, var(--navy-deep) 100%);
+    display:flex;flex-direction:column;justify-content:space-between;padding:44px;color:var(--ivory);
+    overflow:hidden;
+  }
+  .login-illustration svg{position:absolute;inset:0;width:100%;height:100%;opacity:0.9;}
+  .illo-content{position:relative;z-index:2;}
+  .illo-eyebrow{font-size:12px;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold);font-weight:600;}
+  .illo-welcome{font-family:'Fraunces',serif;font-style:italic;font-size:34px;margin-top:10px;line-height:1.15;}
+  .illo-foot{position:relative;z-index:2;font-size:12.5px;color:#B9BFD6;}
+  .illo-foot b{color:var(--gold);font-weight:600;}
+
+  /* Form side */
+  .login-panel{
+    flex:1;background:var(--ivory);display:flex;align-items:center;justify-content:center;padding:48px 44px;
+  }
+  .login-card{width:100%;max-width:340px;}
+  .login-card .brand{font-size:15px;font-style:italic;color:var(--teal);margin-bottom:26px;}
+  .login-card h1{font-size:28px;margin:0 0 6px 0;font-weight:600;}
+  .login-card p.sub{margin:0 0 30px 0;color:#8a8878;font-size:14px;}
+
+  .field{margin-bottom:22px;position:relative;}
+  label{display:block;font-size:12.5px;font-weight:600;color:#8a8878;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;}
   input[type=email], input[type=password]{
-    width:100%;padding:12px 14px;font-size:15px;font-family:'Inter',sans-serif;
-    border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);
-    transition:border-color .15s, box-shadow .15s;
+    width:100%;padding:8px 2px 10px 2px;font-size:15px;font-family:'Inter',sans-serif;
+    border:none;border-bottom:1.5px solid var(--line);background:transparent;color:var(--ink);
+    transition:border-color .15s;
   }
   input[type=email]:focus, input[type=password]:focus{
-    outline:none;border-color:var(--brass);box-shadow:0 0 0 3px rgba(169,129,47,0.18);
+    outline:none;border-bottom-color:var(--navy);
   }
-  .error-msg{color:var(--clay);font-size:13px;margin:-8px 0 16px 0;min-height:16px;}
-  button.submit{
-    width:100%;padding:13px;background:var(--ink);color:var(--ivory);border:none;border-radius:6px;
-    font-size:15px;font-weight:600;cursor:pointer;letter-spacing:0.01em;transition:background .15s, transform .1s;
-  }
-  button.submit:hover{background:#37352C;}
-  button.submit:active{transform:translateY(1px);}
-  .hint{font-size:12.5px;color:#918f80;margin-top:16px;text-align:center;}
+  .row-between{display:flex;justify-content:space-between;align-items:center;margin:-8px 0 22px 0;}
+  .row-between a{font-size:12.5px;color:var(--teal);text-decoration:none;}
+  .row-between a:hover{text-decoration:underline;}
 
+  .error-msg{color:var(--clay);font-size:13px;margin:-10px 0 16px 0;min-height:16px;}
+  button.submit{
+    width:100%;padding:14px;background:var(--navy);color:#fff;border:none;border-radius:8px;
+    font-size:15px;font-weight:600;cursor:pointer;letter-spacing:0.01em;transition:background .15s, transform .1s;
+    box-shadow:0 10px 20px rgba(31,44,77,0.25);
+  }
+  button.submit:hover{background:var(--navy-deep);}
+  button.submit:active{transform:translateY(1px);}
+  .hint{font-size:12.5px;color:#a19f8f;margin-top:20px;text-align:center;}
+  .hint b{color:var(--ink-soft);}
+
+  /* ---------- DASHBOARD ---------- */
   #dashboard-view{display:none;min-height:100vh;}
   .app-shell{display:flex;min-height:100vh;}
-  .sidebar{width:220px;background:var(--ink);color:var(--ivory-dim);padding:28px 18px;flex-shrink:0;display:flex;flex-direction:column;}
-  .sidebar .brand{font-size:19px;font-style:italic;color:var(--ivory);margin-bottom:36px;}
-  .nav-item{padding:10px 12px;border-radius:6px;font-size:14px;margin-bottom:4px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#c9c7b8;transition:background .15s,color .15s;}
+  .sidebar{width:220px;background:var(--navy-deep);color:#B9BFD6;padding:28px 18px;flex-shrink:0;display:flex;flex-direction:column;}
+  .sidebar .brand{font-size:19px;font-style:italic;color:#fff;margin-bottom:36px;}
+  .nav-item{padding:10px 12px;border-radius:6px;font-size:14px;margin-bottom:4px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#9AA1BE;transition:background .15s,color .15s;}
   .nav-item .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.5;}
-  .nav-item.active{background:rgba(216,193,134,0.14);color:var(--brass-soft);font-weight:600;}
-  .nav-item.active .dot{opacity:1;background:var(--brass-soft);}
-  .nav-item:hover{color:var(--ivory);}
-  .sidebar .logout{margin-top:auto;padding-top:18px;border-top:1px solid #3d3b32;font-size:13px;color:#9b998a;cursor:pointer;}
+  .nav-item.active{background:rgba(201,162,75,0.14);color:var(--gold);font-weight:600;}
+  .nav-item.active .dot{opacity:1;background:var(--gold);}
+  .nav-item:hover{color:#fff;}
+  .sidebar .logout{margin-top:auto;padding-top:18px;border-top:1px solid #262F4A;font-size:13px;color:#7C82A0;cursor:pointer;}
   .sidebar .logout:hover{color:var(--clay);}
 
-  .main{flex:1;padding:36px 44px;max-width:1180px;}
+  .main{flex:1;padding:36px 44px;max-width:1180px;background:var(--ivory);}
   .topbar{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;}
   .topbar h1{font-size:26px;margin:0 0 4px 0;font-weight:600;}
-  .topbar .welcome{color:#6b6a5e;font-size:14.5px;}
+  .topbar .welcome{color:#8a8878;font-size:14.5px;}
   .who{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink-soft);}
-  .avatar{width:34px;height:34px;border-radius:50%;background:var(--brass);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;font-family:'Fraunces',serif;}
+  .avatar{width:34px;height:34px;border-radius:50%;background:var(--gold);color:#1B2438;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;font-family:'Fraunces',serif;}
 
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px;}
-  .stat-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;box-shadow:var(--shadow);}
-  .stat-card .label{font-size:12.5px;color:#8b8a7c;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
-  .stat-card .value{font-size:28px;margin-top:8px;font-weight:500;}
+  .stat-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:20px;box-shadow:0 8px 20px rgba(27,36,56,0.06);}
+  .stat-card .label{font-size:12.5px;color:#8a8878;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
+  .stat-card .value{font-size:28px;margin-top:8px;font-weight:500;color:var(--ink);}
   .stat-card .delta{font-size:12.5px;margin-top:6px;color:var(--teal);}
 
-  .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:24px;box-shadow:var(--shadow);}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:24px;box-shadow:0 8px 20px rgba(27,36,56,0.06);}
   .panel h2{font-size:17px;margin:0 0 18px 0;font-weight:600;}
   table{width:100%;border-collapse:collapse;font-size:14px;}
-  th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#8b8a7c;padding:0 12px 10px 12px;border-bottom:1px solid var(--line);font-weight:600;}
+  th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#8a8878;padding:0 12px 10px 12px;border-bottom:1px solid var(--line);font-weight:600;}
   td{padding:14px 12px;border-bottom:1px solid var(--line);}
   tr:last-child td{border-bottom:none;}
   .swatch-chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;}
@@ -86,8 +120,8 @@
   .amt{font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:var(--ink-soft);}
 
   @media (max-width:820px){
-    #login-view{flex-direction:column;}
-    .login-brand{padding:36px;min-height:220px;}
+    .login-frame{flex-direction:column;min-height:auto;}
+    .login-illustration{min-height:200px;padding:32px;}
     .stats{grid-template-columns:repeat(2,1fr);}
     .app-shell{flex-direction:column;}
     .sidebar{width:100%;flex-direction:row;align-items:center;padding:16px 20px;overflow-x:auto;}
@@ -99,47 +133,87 @@
 </head>
 <body>
 
+<!-- ============ LOGIN VIEW ============ -->
 <div id="login-view">
-  <div class="login-brand">
-    <div>
-      <div class="brand">Zynasty CRM</div>
-      <div class="tagline">The studio pipeline — leads, quotations, and client relationships for Zynasty Design, in one place.</div>
-    </div>
-    <div>
-      <div class="swatch-strip">
-        <div class="swatch" style="background:#A9812F"></div>
-        <div class="swatch" style="background:#375E56"></div>
-        <div class="swatch" style="background:#B1503D"></div>
-        <div class="swatch" style="background:#D8C186"></div>
-        <div class="swatch" style="background:#5C5A4E"></div>
+  <div class="login-frame">
+
+    <div class="login-illustration">
+      <svg viewBox="0 0 400 560" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg">
+        <!-- original abstract interior/architectural illustration -->
+        <defs>
+          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#2C3A63"/>
+            <stop offset="1" stop-color="#141B30"/>
+          </linearGradient>
+        </defs>
+        <rect width="400" height="560" fill="url(#sky)"/>
+        <!-- soft moon -->
+        <circle cx="320" cy="90" r="34" fill="#EFE0B0" opacity="0.9"/>
+        <circle cx="320" cy="90" r="52" fill="#EFE0B0" opacity="0.12"/>
+        <!-- layered "room" silhouettes standing in for hills -->
+        <path d="M0 330 Q80 280 160 320 T400 300 V560 H0 Z" fill="#232E52" opacity="0.9"/>
+        <path d="M0 400 Q100 350 220 390 T400 370 V560 H0 Z" fill="#1B2444"/>
+        <path d="M0 470 Q120 430 240 460 T400 440 V560 H0 Z" fill="#141B30"/>
+        <!-- window / furniture motif dots, standing in for foliage -->
+        <g fill="#C9A24B" opacity="0.85">
+          <circle cx="60" cy="360" r="3"/>
+          <circle cx="90" cy="345" r="2.4"/>
+          <circle cx="120" cy="365" r="3"/>
+          <circle cx="150" cy="350" r="2"/>
+          <circle cx="200" cy="340" r="3"/>
+          <circle cx="240" cy="355" r="2.4"/>
+        </g>
+        <g fill="#3E6B63" opacity="0.7">
+          <circle cx="70" cy="420" r="3"/>
+          <circle cx="110" cy="405" r="2.4"/>
+          <circle cx="160" cy="425" r="3"/>
+          <circle cx="210" cy="410" r="2"/>
+          <circle cx="270" cy="420" r="3"/>
+        </g>
+        <!-- a simple lamp / pavilion silhouette as focal motif -->
+        <g transform="translate(150,290)">
+          <rect x="-26" y="10" width="52" height="8" rx="2" fill="#C9A24B"/>
+          <path d="M-30 10 L0 -14 L30 10 Z" fill="#C9A24B"/>
+          <rect x="-4" y="18" width="8" height="26" fill="#C9A24B" opacity="0.9"/>
+        </g>
+      </svg>
+      <div class="illo-content">
+        <div class="illo-eyebrow">Zynasty Design</div>
+        <div class="illo-welcome">Welcome<br>back to the studio</div>
       </div>
-      <div class="foot">Prototype build · not connected to production client data</div>
+      <div class="illo-foot">Prototype build · <b>not</b> connected to production client data</div>
     </div>
-  </div>
 
-  <div class="login-panel">
-    <div class="login-card">
-      <div class="eyebrow">Studio Access</div>
-      <h1>Sign in</h1>
-      <p class="sub">Enter your studio credentials to open the CRM dashboard.</p>
+    <div class="login-panel">
+      <div class="login-card">
+        <div class="brand">Zynasty CRM</div>
+        <h1>Sign in</h1>
+        <p class="sub">Enter your studio credentials to continue.</p>
 
-      <form id="login-form" novalidate>
-        <div class="field">
-          <label for="email">Email</label>
-          <input type="email" id="email" placeholder="you@zynastydesigns.com" autocomplete="username" required>
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required>
-        </div>
-        <div class="error-msg" id="error-msg"></div>
-        <button type="submit" class="submit">Enter studio</button>
-      </form>
-      <div class="hint">Prototype: any valid email + a password (6+ characters) signs you in.</div>
+        <form id="login-form" novalidate>
+          <div class="field">
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@zynastydesigns.com" autocomplete="username" required>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required>
+          </div>
+          <div class="row-between">
+            <span></span>
+            <a href="#" onclick="return false;">Forgot password?</a>
+          </div>
+          <div class="error-msg" id="error-msg"></div>
+          <button type="submit" class="submit">Login</button>
+        </form>
+        <div class="hint">Prototype: any valid email + a password (<b>6+ characters</b>) signs you in.</div>
+      </div>
     </div>
+
   </div>
 </div>
 
+<!-- ============ DASHBOARD VIEW ============ -->
 <div id="dashboard-view">
   <div class="app-shell">
     <div class="sidebar">
@@ -196,19 +270,19 @@
           <tbody>
             <tr>
               <td>Mrs. Anjali Rao</td>
-              <td><span class="swatch-chip"><span class="sq" style="background:#A9812F"></span>Quoted</span></td>
+              <td><span class="swatch-chip"><span class="sq" style="background:#C9A24B"></span>Quoted</span></td>
               <td>2 days ago</td>
               <td class="amt" style="text-align:right">₹6,40,000</td>
             </tr>
             <tr>
               <td>Mr. Devraj Shah</td>
-              <td><span class="swatch-chip"><span class="sq" style="background:#375E56"></span>In Discussion</span></td>
+              <td><span class="swatch-chip"><span class="sq" style="background:#3E6B63"></span>In Discussion</span></td>
               <td>Today</td>
               <td class="amt" style="text-align:right">₹4,10,000</td>
             </tr>
             <tr>
               <td>Ms. Priya Menon</td>
-              <td><span class="swatch-chip"><span class="sq" style="background:#5C5A4E"></span>Won</span></td>
+              <td><span class="swatch-chip"><span class="sq" style="background:#1F2C4D"></span>Won</span></td>
               <td>1 week ago</td>
               <td class="amt" style="text-align:right">₹9,85,000</td>
             </tr>
