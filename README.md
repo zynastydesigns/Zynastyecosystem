@@ -16,8 +16,8 @@ crm-portal.html → Zynasty CRM (prototype) — studio pipeline dashboard
 ## Deployment
 
 Hosted on Cloudflare Pages, currently at:
-https://zynastyportal.pages.dev/crm-portal once you wire up routing
 
+- https://zynastyportal.pages.dev/crm-portal once you wire up routing
 - https://zynastyportal.pages.dev/ (Client Portal — served from `public/index.html`)
 - https://zynastyportal.pages.dev/studio-portal (Studio Portal)
 
