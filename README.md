@@ -11,11 +11,13 @@ Client and studio portal for Zynasty Design's — an interior design company.
                             quotation builder, agreements, KYC review)
 CHANGELOG.md              → History of fixes and features
 README.md                 → This file
-```
+crm-portal.html → Zynasty CRM (prototype) — studio pipeline dashboard
 
 ## Deployment
 
 Hosted on Cloudflare Pages, currently at:
+https://zynastyportal.pages.dev/crm-portal once you wire up routing
+
 - https://zynastyportal.pages.dev/ (Client Portal — served from `public/index.html`)
 - https://zynastyportal.pages.dev/studio-portal (Studio Portal)
 
@@ -33,6 +35,9 @@ quotations, generated PDFs, and item presets are all stored under keys like:
 - `quotation-pdf:<projectId>` (shared) — generated quotation PDF data URL
 
 ## Notes for future edits
+
+crm-portal.html is the new CRM prototype — auth is currently mocked, no real backend yet
+
 
 - `studio-portal.html` is the internal tool — most feature work happens here.
 - `index.html` is the client-facing read-only portal (access-code login).
