@@ -199,14 +199,19 @@
             <label for="password">Password</label>
             <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required>
           </div>
+          <div class="field" id="invite-field" style="display:none;">
+            <label for="invite-code">Invite Code</label>
+            <input type="text" id="invite-code" placeholder="Staff invite code" autocomplete="off">
+          </div>
           <div class="row-between">
             <span></span>
             <a href="#" onclick="return false;">Forgot password?</a>
           </div>
           <div class="error-msg" id="error-msg"></div>
-          <button type="submit" class="submit">Login</button>
+          <button type="submit" class="submit" id="login-submit-btn">Login</button>
         </form>
-        <div class="hint">Note: sign-in isn't yet connected to a staff directory — anyone with this link and a valid-format email/password can enter. Ask Claude to wire up real staff accounts when you're ready.</div>
+        <div class="hint">Studio staff only. Contact your admin if you need an account or a password reset.</div>
+        <div id="auth-toggle" style="text-align:center;margin-top:16px;font-size:13px;color:var(--teal);cursor:pointer;">New here? Create an account</div>
       </div>
     </div>
 
@@ -224,6 +229,7 @@
       <div class="nav-item"><span class="dot"></span> Projects</div>
       <div class="nav-item"><span class="dot"></span> Quotations</div>
       <div class="logout" id="logout-btn">Sign out</div>
+      <div class="logout" id="delete-account-btn" style="color:#8a5450;">Delete account</div>
     </div>
 
     <div class="main">
@@ -288,6 +294,35 @@
   const avatarInitial = document.getElementById('avatar-initial');
   const logoutBtn = document.getElementById('logout-btn');
   const dataStatus = document.getElementById('data-status');
+  const submitBtn = document.getElementById('login-submit-btn');
+  const authToggle = document.getElementById('auth-toggle');
+  const inviteField = document.getElementById('invite-field');
+  const inviteInput = document.getElementById('invite-code');
+  const deleteAccountBtn = document.getElementById('delete-account-btn');
+
+  // Shared code staff use to self-register. Visible in page source by
+  // design — it only screens out random visitors, not a real secret.
+  const INVITE_CODE = "ZYNASTY2026";
+  let authMode = 'login'; // 'login' | 'signup'
+
+  function setAuthMode(mode){
+    authMode = mode;
+    if(authMode === 'signup'){
+      inviteField.style.display = '';
+      submitBtn.textContent = 'Create account';
+      authToggle.textContent = 'Already have an account? Sign in';
+    }else{
+      inviteField.style.display = 'none';
+      submitBtn.textContent = 'Login';
+      authToggle.textContent = 'New here? Create an account';
+    }
+  }
+
+  authToggle.addEventListener('click', function(){
+    errorMsg.textContent = '';
+    form.reset();
+    setAuthMode(authMode === 'login' ? 'signup' : 'login');
+  });
 
   // ---------- Session: persists across reloads, expires after ~30s of an
   // inactive tab (not focused / not visible), rather than on every reload. ----------
@@ -305,8 +340,8 @@
       return Date.now() - last;
     }catch(e){ return Infinity; }
   }
-  async function saveSession(email){
-    try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ email })); }catch(e){ console.error('Could not save session', e); }
+  async function saveSession(email, tokens){
+    try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, access_token: tokens.access_token, refresh_token: tokens.refresh_token })); }catch(e){ console.error('Could not save session', e); }
     markActive();
   }
   async function clearSession(){
@@ -391,18 +426,118 @@
       errorMsg.textContent = 'Password must be at least 6 characters.';
       return;
     }
+
+    if(authMode === 'signup'){
+      const code = inviteInput.value.trim();
+      if(code !== INVITE_CODE){
+        errorMsg.textContent = 'Invalid invite code.';
+        return;
+      }
+    }
+
     errorMsg.textContent = '';
-    await saveSession(email);
-    showDashboard(email);
+    submitBtn.disabled = true;
+    submitBtn.textContent = authMode === 'signup' ? 'Creating account…' : 'Signing in…';
+    try{
+      const endpoint = authMode === 'signup'
+        ? `${SUPABASE_URL}/auth/v1/signup`
+        : `${SUPABASE_URL}/auth/v1/token?grant_type=password`;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if(!res.ok){
+        errorMsg.textContent = (data && (data.error_description || data.msg)) || (authMode === 'signup' ? 'Could not create account.' : 'Invalid email or password.');
+        return;
+      }
+      if(data.access_token){
+        // Signed in immediately (login, or signup with email confirmation off)
+        await saveSession(email, { access_token: data.access_token, refresh_token: data.refresh_token });
+        showDashboard(email);
+      }else if(authMode === 'signup'){
+        // Account created but needs email confirmation before it can sign in
+        form.reset();
+        setAuthMode('login');
+        errorMsg.textContent = 'Account created — welcome to the Zynasty team! Check your email to confirm, then sign in.';
+      }
+    }catch(err){
+      console.error('Auth request failed', err);
+      errorMsg.textContent = "Couldn't reach the sign-in service. Check your connection and try again.";
+    }finally{
+      submitBtn.disabled = false;
+      submitBtn.textContent = authMode === 'signup' ? 'Create account' : 'Login';
+    }
   });
 
   logoutBtn.addEventListener('click', async function(){
+    try{
+      const session = await loadSession();
+      if(session && session.access_token){
+        await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+          method: 'POST',
+          headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + session.access_token }
+        });
+      }
+    }catch(e){ console.error('Sign-out request failed (clearing local session anyway)', e); }
     await clearSession();
     stopHeartbeat();
     stopPolling();
     showLogin();
   });
 
+  deleteAccountBtn.addEventListener('click', async function(){
+    const typed = prompt('This permanently deletes your account and cannot be undone.\n\nType DELETE to confirm.');
+    if(typed !== 'DELETE') return;
+
+    const session = await loadSession();
+    if(!session || !session.access_token){ showLogin(); return; }
+
+    deleteAccountBtn.textContent = 'Deleting…';
+    try{
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/delete-account`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + session.access_token }
+      });
+      if(!res.ok) throw new Error('Edge function unavailable (HTTP ' + res.status + ')');
+      await clearSession();
+      stopHeartbeat(); stopPolling();
+      showLogin();
+      errorMsg.textContent = 'Your account has been deleted.';
+    }catch(err){
+      // Edge function not deployed yet (or unreachable) — fall back to a
+      // logged request an admin can action from the Supabase dashboard.
+      console.warn('Direct deletion unavailable, filing a deletion request instead', err);
+      await requestAccountDeletion(session.email);
+      await clearSession();
+      stopHeartbeat(); stopPolling();
+      showLogin();
+      errorMsg.textContent = 'Deletion requested — your admin will remove your account shortly.';
+    }finally{
+      deleteAccountBtn.textContent = 'Delete account';
+    }
+  });
+
+  async function requestAccountDeletion(email){
+    try{
+      const getRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/${SB_TABLE}?key=eq.deletion_requests&select=value`,
+        { headers: SB_HEADERS }
+      );
+      let list = [];
+      if(getRes.ok){
+        const rows = await getRes.json();
+        if(rows && rows.length) list = JSON.parse(rows[0].value || '[]');
+      }
+      list.push({ email, requestedAt: new Date().toISOString() });
+      await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?on_conflict=key`, {
+        method: 'POST',
+        headers: { ...SB_HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+        body: JSON.stringify({ key: 'deletion_requests', value: JSON.stringify(list) })
+      });
+    }catch(e){ console.error('Could not record deletion request', e); }
+  }
   // ---------- Live data: same Supabase store used by index.html and
   // studio-portal.html, so this reflects real projects the moment Studio
   // saves them — read-only from here. ----------
