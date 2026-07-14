@@ -311,33 +311,34 @@
   const avatarInitial = document.getElementById('avatar-initial');
   const logoutBtn = document.getElementById('logout-btn');
 
-  let memorySession = null;
+  // Session persistence via localStorage. This is a real deployed site
+  // (Cloudflare Pages), not a Claude Artifact, so window.storage isn't
+  // available here — localStorage is the correct tool: it's actual browser
+  // storage and survives page reloads, unlike an in-memory JS variable.
+  const SESSION_KEY = 'zynasty-crm-session';
+
   async function saveSession(email){
     try{
-      if (window.storage && window.storage.set){
-        await window.storage.set('crm-session', JSON.stringify({ email }), false);
-        return;
-      }
-    }catch(e){}
-    memorySession = { email };
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ email }));
+    }catch(e){
+      console.error('Could not save session:', e);
+    }
   }
   async function loadSession(){
     try{
-      if (window.storage && window.storage.get){
-        const res = await window.storage.get('crm-session', false);
-        if (res && res.value) return JSON.parse(res.value);
-        return null;
-      }
-    }catch(e){}
-    return memorySession;
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){
+      console.error('Could not load session:', e);
+      return null;
+    }
   }
   async function clearSession(){
     try{
-      if (window.storage && window.storage.delete){
-        await window.storage.delete('crm-session', false);
-      }
-    }catch(e){}
-    memorySession = null;
+      localStorage.removeItem(SESSION_KEY);
+    }catch(e){
+      console.error('Could not clear session:', e);
+    }
   }
 
   function showDashboard(email){
