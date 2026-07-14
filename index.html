@@ -149,6 +149,7 @@
   .error-msg{color:#F3A98F;font-size:13px;margin-top:14px;font-family:'IBM Plex Mono',monospace;}
 
   .portal-hero{background:var(--ink);color:var(--paper);border-radius:12px;padding:32px 28px 8px;margin-bottom:20px;}
+  .portal-hero .greeting{font-size:15px;color:var(--paper);opacity:.85;margin-bottom:8px;}
   .portal-hero .eyebrow{margin-bottom:10px;}
   .portal-hero h1{font-family:'Fraunces',serif;font-size:30px;font-weight:500;margin:0 0 4px;}
   .portal-hero .addr{color:var(--slate);font-size:14px;margin-bottom:6px;}
@@ -498,6 +499,15 @@ function escapeHtml(str){
 }
 function escapeAttr(str){ return escapeHtml(str); }
 
+// Combines the client's chosen salutation with their name, e.g. "Mr. Sharma"
+// instead of just "Sharma" — mirrors the same helper in studio-portal.html.
+function formatClientName(project){
+  const salutation = (project && project.clientSalutation || "").trim();
+  const name = (project && project.clientName || "").trim();
+  if(!name) return "";
+  return salutation ? salutation + " " + name : name;
+}
+
 function copyToClipboard(text, btnEl){
   const doFallback = () => {
     const ta = document.createElement("textarea");
@@ -830,6 +840,7 @@ function renderClient(){
     return `
       <button class="back-link" id="backBtn">← Look up another project</button>
       <div class="portal-hero">
+        ${formatClientName(p) ? `<div class="greeting">Hi ${escapeHtml(formatClientName(p))},</div>` : ""}
         <div class="eyebrow">${escapeHtml(p.projectType)} Project</div>
         <h1>${escapeHtml(p.projectName)}</h1>
         <div class="addr">${escapeHtml(p.propertyAddress)||""}</div>

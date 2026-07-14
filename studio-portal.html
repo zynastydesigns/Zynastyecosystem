@@ -1394,12 +1394,20 @@ function attachQuotationHandlers(){
       const originalLabel = saveBtn.textContent;
       saveBtn.textContent = "Saving…";
       await saveQuotation();
+      // Mark the quotation as saved as soon as the quotation data itself is
+      // persisted — this is what the card footer's "quotation saved" status
+      // (and switch from Welcome buttons to Client buttons) depends on. It
+      // must not be gated behind the PDF regeneration below: a slow/failed
+      // PDF step shouldn't make Studio think nothing was saved when the
+      // client portal already reflects the saved quotation.
+      const project = state.projects.find(p=>p.id===state.quotationProjectId);
+      if(project){
+        project.quotationSavedAt = new Date().toISOString();
+        await saveProjects();
+      }
       try{
-        const project = state.projects.find(p=>p.id===state.quotationProjectId);
         if(project){
           await generateAndStoreQuotationPdf(project, state.quotation);
-          project.quotationSavedAt = new Date().toISOString();
-          await saveProjects();
           showToast("Quotation saved and PDF updated for the client portal.", false);
         }
       }catch(e){
