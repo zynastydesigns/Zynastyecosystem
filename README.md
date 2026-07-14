@@ -11,7 +11,7 @@ Client and studio portal for Zynasty Design's — an interior design company.
                             quotation builder, agreements, KYC review)
 CHANGELOG.md              → History of fixes and features
 README.md                 → This file
-crm-portal.html → Zynasty CRM (prototype) — studio pipeline dashboard
+crm-portal.html           → Zynasty CRM (prototype) — studio dashboard
 
 ## Deployment
 
