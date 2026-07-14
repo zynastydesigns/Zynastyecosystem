@@ -3,7 +3,17 @@
 All notable changes to the Zynasty Ecosystem portals are recorded here.
 
 ## Unreleased / Initial repo commit — 2026-07-15
+## Unreleased — Zynasty CRM prototype added — 2026-07-15
 
+### Added
+- **`crm-portal.html`** — first working prototype of Zynasty CRM: a studio
+  sign-in screen (email + password + submit) leading into a dashboard with
+  pipeline stats (Active Leads, Projects In Progress, Quotations Sent,
+  Pipeline Value) and a Recent Activity table. Session is stored via
+  `window.storage` (falls back to in-memory state when storage isn't
+  available), matching the pattern used by `index.html` and
+  `studio-portal.html`. No backend yet — login accepts any valid-format
+  email with a 6+ character password.
 ### Removed
 - **`client-portal.html`** — was a byte-for-byte duplicate of `index.html`,
   not linked to from anywhere in either app. Removed to avoid the two copies
