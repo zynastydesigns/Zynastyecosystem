@@ -52,6 +52,13 @@
 
   /* ---- Toolbar ---- */
   .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:24px;}
+  .section-tabs{display:flex;gap:8px;margin-bottom:18px;border-bottom:1px solid var(--line);}
+  .section-tab{background:none;border:none;padding:10px 4px;margin-right:18px;font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.04em;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;}
+  .section-tab .count{display:inline-block;margin-left:6px;background:var(--paper-2);border-radius:10px;padding:1px 8px;font-size:11.5px;}
+  .section-tab.active{color:var(--ink);border-bottom-color:var(--brass);font-weight:600;}
+  .section-tab.active .count{background:var(--brass);color:var(--paper);}
+  .section-tab.lost.active{border-bottom-color:#A33D3D;}
+  .section-tab.lost.active .count{background:#A33D3D;}
   .toolbar input[type=text], .toolbar select{
     font-family:'IBM Plex Sans',sans-serif;font-size:14px;
     border:1px solid var(--line);background:#fff;border-radius:6px;padding:10px 12px;color:var(--ink);
@@ -486,7 +493,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "" };
 
 function showToast(msg, isError){
   state.toast = { msg, isError: !!isError };
@@ -1725,32 +1732,43 @@ function render(){
 }
 
 function renderStudio(){
-  let list = state.projects.filter(p=>{
+  const liveProjects = state.projects.filter(p=>p.status !== "Lost");
+  const lostProjects = state.projects.filter(p=>p.status === "Lost");
+  const section = state.section === "lost" ? "lost" : "live";
+  const sectionProjects = section === "lost" ? lostProjects : liveProjects;
+
+  let list = sectionProjects.filter(p=>{
     const matchesSearch = !state.search || (p.projectName+p.clientName+p.propertyAddress).toLowerCase().includes(state.search.toLowerCase());
     const matchesFilter = state.filter === "all" || p.status === state.filter;
     return matchesSearch && matchesFilter;
   });
 
+  const tabs = `
+    <div class="section-tabs">
+      <button type="button" class="section-tab ${section==="live"?"active":""}" data-section="live">Live<span class="count">${liveProjects.length}</span></button>
+      <button type="button" class="section-tab lost ${section==="lost"?"active":""}" data-section="lost">Lost<span class="count">${lostProjects.length}</span></button>
+    </div>`;
+
   const toolbar = `
     <div class="toolbar">
       <input type="text" id="searchInput" placeholder="Search by project, client, or address…" value="${escapeHtml(state.search)}">
+      ${section==="live" ? `
       <select id="filterSelect">
         <option value="all">All statuses</option>
         ${STAGES.map(s=>`<option value="${s}" ${state.filter===s?"selected":""}>${s}</option>`).join("")}
-        <option value="Lost" ${state.filter==="Lost"?"selected":""}>Lost</option>
-      </select>
+      </select>` : ""}
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
 
   if(state.projects.length === 0){
-    return toolbar + `
+    return tabs + toolbar + `
       <div class="empty">
         <div class="display">No projects yet</div>
         <div>Add your first project to start tracking onboarding, status, and contract details.</div>
       </div>`;
   }
   if(list.length === 0){
-    return toolbar + `<div class="empty">No projects match your search.</div>`;
+    return tabs + toolbar + `<div class="empty">${section==="lost" ? "No lost projects." : "No projects match your search."}</div>`;
   }
 
   const cards = list.map(p=>{
@@ -1812,7 +1830,7 @@ function renderStudio(){
     </div>`;
   }).join("");
 
-  return toolbar + `<div class="grid">${cards}</div>`;
+  return tabs + toolbar + `<div class="grid">${cards}</div>`;
 }
 
 function renderModal(){
@@ -2214,6 +2232,14 @@ function attachStudioHandlers(){
   if(s) s.oninput = (e)=>{ state.search = e.target.value; render(); s.focus(); s.setSelectionRange(s.value.length,s.value.length); };
   if(f) f.onchange = (e)=>{ state.filter = e.target.value; render(); };
   if(n) n.onclick = ()=>{ state.editing = "new"; render(); };
+
+  document.querySelectorAll(".section-tab").forEach(tab=>{
+    tab.addEventListener("click", ()=>{
+      state.section = tab.dataset.section;
+      state.filter = "all";
+      render();
+    });
+  });
 
   document.querySelectorAll(".card").forEach(c=>{
     c.addEventListener("click",(e)=>{
