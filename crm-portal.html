@@ -109,6 +109,15 @@
   .stat-card .value{font-size:28px;margin-top:8px;font-weight:500;color:var(--ink);}
   .stat-card .delta{font-size:12.5px;margin-top:6px;color:var(--teal);}
 
+  .profile-panel{margin-bottom:24px;}
+  .profile-photo-row{display:flex;align-items:center;gap:20px;margin-bottom:28px;}
+  .profile-photo{width:72px;height:72px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Fraunces',serif;font-size:26px;font-weight:600;flex-shrink:0;overflow:hidden;}
+  .profile-photo img{width:100%;height:100%;object-fit:cover;}
+  .file-btn{display:inline-block;padding:9px 16px;border:1.5px solid var(--line);border-radius:7px;font-size:13px;font-weight:600;color:var(--navy);cursor:pointer;background:#fff;transition:border-color .15s;}
+  .file-btn:hover{border-color:var(--navy);}
+  .profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px;}
+  @media (max-width:640px){ .profile-grid{grid-template-columns:1fr;} }
+
   .panel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:24px;box-shadow:0 8px 20px rgba(27,36,56,0.06);}
   .panel h2{font-size:17px;margin:0 0 18px 0;font-weight:600;}
   table{width:100%;border-collapse:collapse;font-size:14px;}
@@ -223,11 +232,12 @@
   <div class="app-shell">
     <div class="sidebar">
       <div class="brand">Zynasty CRM</div>
-      <div class="nav-item active"><span class="dot"></span> Overview</div>
+      <div class="nav-item active" data-view="overview"><span class="dot"></span> Overview</div>
       <div class="nav-item"><span class="dot"></span> Leads</div>
       <div class="nav-item"><span class="dot"></span> Clients</div>
       <div class="nav-item"><span class="dot"></span> Projects</div>
       <div class="nav-item"><span class="dot"></span> Quotations</div>
+      <div class="nav-item" data-view="profile"><span class="dot"></span> Profile</div>
       <div class="logout" id="logout-btn">Sign out</div>
       <div class="logout" id="delete-account-btn" style="color:#8a5450;">Delete account</div>
     </div>
@@ -235,8 +245,9 @@
     <div class="main">
       <div class="topbar">
         <div>
-          <h1>Overview</h1>
-          <div class="welcome">Live from Studio Portal data. <span id="data-status" style="color:#B1503D;"></span></div>
+          <h1 id="main-heading">Overview</h1>
+          <div class="welcome" id="subheading-overview">Live from Studio Portal data. <span id="data-status" style="color:#B1503D;"></span></div>
+          <div class="welcome" id="subheading-profile" style="display:none;">Your account details, visible only to you.</div>
         </div>
         <div class="who">
           <div class="avatar" id="avatar-initial">Z</div>
@@ -244,6 +255,7 @@
         </div>
       </div>
 
+      <div id="view-overview">
       <div class="stats">
         <div class="stat-card">
           <div class="label">Active Leads</div>
@@ -278,6 +290,57 @@
           </tbody>
         </table>
       </div>
+      </div>
+
+      <div id="view-profile" style="display:none;">
+        <div class="panel profile-panel">
+          <div class="profile-photo-row">
+            <div class="profile-photo" id="profile-photo-preview">Z</div>
+            <div>
+              <label class="file-btn" for="profile-photo-input">Change photo</label>
+              <input type="file" id="profile-photo-input" accept="image/*" style="display:none;">
+              <div class="hint" style="text-align:left;margin-top:8px;">JPG or PNG, square images look best.</div>
+            </div>
+          </div>
+
+          <div class="profile-grid">
+            <div class="field">
+              <label for="profile-name">Full Name</label>
+              <input type="text" id="profile-name" placeholder="Jane Doe">
+            </div>
+            <div class="field">
+              <label for="profile-role">Role / Title</label>
+              <input type="text" id="profile-role" placeholder="Interior Designer">
+            </div>
+            <div class="field">
+              <label for="profile-phone">Phone Number</label>
+              <input type="tel" id="profile-phone" placeholder="+91 98765 43210">
+            </div>
+            <div class="field">
+              <label for="profile-experience">Experience (years)</label>
+              <input type="number" id="profile-experience" min="0" step="1" placeholder="5">
+            </div>
+          </div>
+          <div class="error-msg" id="profile-msg"></div>
+          <button type="button" class="submit" id="profile-save-btn" style="width:auto;padding:12px 28px;">Save Profile</button>
+        </div>
+
+        <div class="panel profile-panel">
+          <h2 style="margin-top:0;">Change Password</h2>
+          <div class="profile-grid">
+            <div class="field">
+              <label for="new-password">New Password</label>
+              <input type="password" id="new-password" placeholder="••••••••" autocomplete="new-password">
+            </div>
+            <div class="field">
+              <label for="confirm-password">Confirm New Password</label>
+              <input type="password" id="confirm-password" placeholder="••••••••" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="error-msg" id="password-msg"></div>
+          <button type="button" class="submit" id="password-save-btn" style="width:auto;padding:12px 28px;">Update Password</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -299,6 +362,26 @@
   const inviteField = document.getElementById('invite-field');
   const inviteInput = document.getElementById('invite-code');
   const deleteAccountBtn = document.getElementById('delete-account-btn');
+  const navOverview = document.querySelector('.nav-item[data-view="overview"]');
+  const navProfile = document.querySelector('.nav-item[data-view="profile"]');
+  const viewOverview = document.getElementById('view-overview');
+  const viewProfile = document.getElementById('view-profile');
+  const mainHeading = document.getElementById('main-heading');
+  const subheadingOverview = document.getElementById('subheading-overview');
+  const subheadingProfile = document.getElementById('subheading-profile');
+  const profilePhotoPreview = document.getElementById('profile-photo-preview');
+  const profilePhotoInput = document.getElementById('profile-photo-input');
+  const profileNameInput = document.getElementById('profile-name');
+  const profileRoleInput = document.getElementById('profile-role');
+  const profilePhoneInput = document.getElementById('profile-phone');
+  const profileExperienceInput = document.getElementById('profile-experience');
+  const profileMsg = document.getElementById('profile-msg');
+  const profileSaveBtn = document.getElementById('profile-save-btn');
+  const newPasswordInput = document.getElementById('new-password');
+  const confirmPasswordInput = document.getElementById('confirm-password');
+  const passwordMsg = document.getElementById('password-msg');
+  const passwordSaveBtn = document.getElementById('password-save-btn');
+  let pendingAvatarDataUrl = null; // set when the user picks a new photo, cleared after save
 
   // Shared code staff use to self-register. Visible in page source by
   // design — it only screens out random visitors, not a real secret.
@@ -401,6 +484,8 @@
     dashView.style.display = 'block';
     startHeartbeat();
     startPolling();
+    switchView('overview');
+    loadProfile();
   }
   function showLogin(){
     dashView.style.display = 'none';
@@ -412,6 +497,165 @@
   function isValidEmail(v){
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
   }
+
+  // ---------- Profile section (nav switching + Supabase Auth user_metadata) ----------
+  function switchView(view){
+    if(view === 'profile'){
+      viewOverview.style.display = 'none';
+      viewProfile.style.display = '';
+      navOverview.classList.remove('active');
+      navProfile.classList.add('active');
+      mainHeading.textContent = 'Profile';
+      subheadingOverview.style.display = 'none';
+      subheadingProfile.style.display = '';
+    }else{
+      viewProfile.style.display = 'none';
+      viewOverview.style.display = '';
+      navProfile.classList.remove('active');
+      navOverview.classList.add('active');
+      mainHeading.textContent = 'Overview';
+      subheadingProfile.style.display = 'none';
+      subheadingOverview.style.display = '';
+    }
+  }
+  navOverview.addEventListener('click', ()=>switchView('overview'));
+  navProfile.addEventListener('click', ()=>switchView('profile'));
+
+  function renderAvatar(name, email, avatarUrl){
+    const initial = (name || email || '?').trim()[0].toUpperCase();
+    avatarInitial.innerHTML = '';
+    profilePhotoPreview.innerHTML = '';
+    if(avatarUrl){
+      avatarInitial.innerHTML = `<img src="${avatarUrl}" alt="">`;
+      profilePhotoPreview.innerHTML = `<img src="${avatarUrl}" alt="">`;
+    }else{
+      avatarInitial.textContent = initial;
+      profilePhotoPreview.textContent = initial;
+    }
+  }
+
+  async function loadProfile(){
+    const session = await loadSession();
+    if(!session || !session.access_token) return;
+    try{
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + session.access_token }
+      });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const user = await res.json();
+      const meta = user.user_metadata || {};
+      profileNameInput.value = meta.full_name || '';
+      profileRoleInput.value = meta.role || '';
+      profilePhoneInput.value = meta.phone || '';
+      profileExperienceInput.value = meta.experience_years || '';
+      pendingAvatarDataUrl = null;
+      renderAvatar(meta.full_name, session.email, meta.avatar_url);
+    }catch(e){
+      console.error('Could not load profile', e);
+    }
+  }
+
+  profilePhotoInput.addEventListener('change', function(){
+    const file = profilePhotoInput.files && profilePhotoInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      const img = new Image();
+      img.onload = function(){
+        // Downscale to a small square so it comfortably fits in Supabase's
+        // user_metadata size limit instead of needing a Storage bucket.
+        const size = 160;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const dx = (size - img.width * scale) / 2;
+        const dy = (size - img.height * scale) / 2;
+        ctx.drawImage(img, dx, dy, img.width * scale, img.height * scale);
+        pendingAvatarDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        profilePhotoPreview.innerHTML = `<img src="${pendingAvatarDataUrl}" alt="">`;
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  profileSaveBtn.addEventListener('click', async function(){
+    const session = await loadSession();
+    if(!session || !session.access_token){ showLogin(); return; }
+    profileMsg.textContent = '';
+    profileSaveBtn.disabled = true;
+    profileSaveBtn.textContent = 'Saving…';
+    try{
+      const payload = {
+        data: {
+          full_name: profileNameInput.value.trim(),
+          role: profileRoleInput.value.trim(),
+          phone: profilePhoneInput.value.trim(),
+          experience_years: profileExperienceInput.value ? Number(profileExperienceInput.value) : null
+        }
+      };
+      if(pendingAvatarDataUrl) payload.data.avatar_url = pendingAvatarDataUrl;
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        method: 'PUT',
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if(!res.ok) throw new Error((data && data.msg) || 'HTTP ' + res.status);
+      pendingAvatarDataUrl = null;
+      whoEmail.textContent = session.email;
+      renderAvatar(payload.data.full_name, session.email, data.user_metadata && data.user_metadata.avatar_url);
+      profileMsg.style.color = 'var(--teal)';
+      profileMsg.textContent = 'Profile saved.';
+    }catch(err){
+      console.error('Could not save profile', err);
+      profileMsg.style.color = '';
+      profileMsg.textContent = "Couldn't save your profile. Try again.";
+    }finally{
+      profileSaveBtn.disabled = false;
+      profileSaveBtn.textContent = 'Save Profile';
+    }
+  });
+
+  passwordSaveBtn.addEventListener('click', async function(){
+    const session = await loadSession();
+    if(!session || !session.access_token){ showLogin(); return; }
+    const pw = newPasswordInput.value;
+    const confirm = confirmPasswordInput.value;
+    passwordMsg.style.color = '';
+    if(pw.length < 6){
+      passwordMsg.textContent = 'Password must be at least 6 characters.';
+      return;
+    }
+    if(pw !== confirm){
+      passwordMsg.textContent = 'Passwords do not match.';
+      return;
+    }
+    passwordMsg.textContent = '';
+    passwordSaveBtn.disabled = true;
+    passwordSaveBtn.textContent = 'Updating…';
+    try{
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        method: 'PUT',
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw })
+      });
+      const data = await res.json();
+      if(!res.ok) throw new Error((data && data.msg) || 'HTTP ' + res.status);
+      newPasswordInput.value = '';
+      confirmPasswordInput.value = '';
+      passwordMsg.style.color = 'var(--teal)';
+      passwordMsg.textContent = 'Password updated.';
+    }catch(err){
+      console.error('Could not update password', err);
+      passwordMsg.style.color = '';
+      passwordMsg.textContent = "Couldn't update your password. Try again.";
+    }finally{
+      passwordSaveBtn.disabled = false;
+      passwordSaveBtn.textContent = 'Update Password';
+    }
+  });
 
   form.addEventListener('submit', async function(e){
     e.preventDefault();
