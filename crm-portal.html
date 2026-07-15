@@ -205,21 +205,19 @@
      scrolls internally, so all stages stay reachable within roughly one
      screenful instead of a long page-level scroll. */
   @media (max-width:1024px) and (min-width:641px){
-    .leads-board{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+    .leads-board{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;grid-auto-flow:dense;}
     .lead-column{max-height:min(420px, 50vh);}
-    .lead-column-last{grid-column:1 / -1;}
   }
   /* Mobile: still two columns where width allows (phones in landscape or
      wider phones), each with its own capped, internally-scrolling list,
      so reaching a later stage never means scrolling through every card
      of every earlier stage first. */
   @media (max-width:640px){
-    .leads-board{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+    .leads-board{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;grid-auto-flow:dense;}
     .lead-column{padding:10px;max-height:min(360px, 46vh);}
     .lead-column-header .name{font-size:11px;}
     .lead-card{padding:10px;}
     .lc-action{height:36px;}
-    .lead-column-last{grid-column:1 / -1;}
   }
   @media (max-width:400px){
     .leads-board{grid-template-columns:1fr;}
@@ -475,11 +473,11 @@
           <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙 Dark</button>
         </div>
         <div class="nav-item" id="help-support-btn"><span class="dot"></span> Help &amp; Support</div>
-      </div>
-      <div class="logout" id="logout-btn">
-        <div class="logout-action">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h12"/></svg>
-          <span>Sign out</span>
+        <div class="logout" id="logout-btn">
+          <div class="logout-action">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h12"/></svg>
+            <span>Sign out</span>
+          </div>
         </div>
       </div>
     </div>
