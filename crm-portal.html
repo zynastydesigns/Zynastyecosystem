@@ -162,6 +162,19 @@
     display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;align-items:start;
     width:100%;
   }
+  /* On the desktop 5-across grid, leads-col wrappers are inert (display:contents)
+     so their children act as direct grid items; order below restores the
+     Fresh/Warm/Hot/Converted/Lost sequence regardless of which wrapper a
+     stage lives in. On the 2-column layouts further down, each leads-col
+     becomes a real flex column that stacks its own stages independently —
+     that's what lets Lost sit right under Converted's actual content
+     instead of being pushed down to match Hot's taller column. */
+  .leads-col{display:contents;}
+  .lead-column[data-stage="Fresh"]{order:1;}
+  .lead-column[data-stage="Warm"]{order:2;}
+  .lead-column[data-stage="Hot"]{order:3;}
+  .lead-column[data-stage="Converted"]{order:4;}
+  .lead-column[data-stage="Lost"]{order:5;}
   .lead-column{
     background:#F4F0E4;border-radius:10px;padding:12px;min-width:0;transition:background .15s ease;
     display:flex;flex-direction:column;max-height:min(560px, calc(100vh - 260px));
@@ -201,27 +214,33 @@
   body.dark-mode .lc-action{background:#1B2340;color:#B9BFD6;}
   body.dark-mode .lead-column.drag-over{background:#232C4E;}
 
-  /* Tablet: two stage columns per row instead of one, and each column
-     scrolls internally, so all stages stay reachable within roughly one
-     screenful instead of a long page-level scroll. */
+  /* Tablet: two independent stacked columns (left: Fresh, Hot — right: Warm,
+     Converted, Lost) instead of a 5-across grid, so each column's height
+     depends only on its own stages. This is what keeps Lost tucked directly
+     under Converted, visible on screen, instead of trailing below Hot. */
   @media (max-width:1024px) and (min-width:641px){
-    .leads-board{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;grid-auto-flow:dense;}
-    .lead-column{max-height:min(420px, 50vh);}
+    .leads-board{display:flex;grid-template-columns:none;gap:12px;align-items:flex-start;}
+    .leads-col{display:flex;flex-direction:column;gap:12px;flex:1;min-width:0;}
+    .lead-column{max-height:min(420px, 50vh);order:initial;}
   }
-  /* Mobile: still two columns where width allows (phones in landscape or
-     wider phones), each with its own capped, internally-scrolling list,
-     so reaching a later stage never means scrolling through every card
-     of every earlier stage first. */
+  /* Mobile: same two independent stacked columns, sized for phones. */
   @media (max-width:640px){
-    .leads-board{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;grid-auto-flow:dense;}
-    .lead-column{padding:10px;max-height:min(360px, 46vh);}
+    .leads-board{display:flex;grid-template-columns:none;gap:10px;align-items:flex-start;}
+    .leads-col{display:flex;flex-direction:column;gap:10px;flex:1;min-width:0;}
+    .lead-column{padding:10px;max-height:min(360px, 46vh);order:initial;}
     .lead-column-header .name{font-size:11px;}
     .lead-card{padding:10px;}
     .lc-action{height:36px;}
   }
   @media (max-width:400px){
-    .leads-board{grid-template-columns:1fr;}
-    .lead-column{max-height:260px;}
+    .leads-board{flex-direction:column;}
+    .leads-col{display:contents;}
+    .lead-column{max-height:260px;order:initial;}
+    .lead-column[data-stage="Fresh"]{order:1;}
+    .lead-column[data-stage="Warm"]{order:2;}
+    .lead-column[data-stage="Hot"]{order:3;}
+    .lead-column[data-stage="Converted"]{order:4;}
+    .lead-column[data-stage="Lost"]{order:5;}
   }
 
   .theme-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 2px;margin:10px 0;font-size:13px;color:#B9BFD6;border-top:1px solid #262F4A;border-bottom:1px solid #262F4A;}
@@ -1571,7 +1590,7 @@
     });
     const viewLeadsScrollTop = viewLeads ? viewLeads.scrollTop : 0;
 
-    leadsBoard.innerHTML = LEAD_STAGES.map(function(stage){
+    const columnsHtml = LEAD_STAGES.map(function(stage){
       const items = leads.filter(l => l.stage === stage);
       const cardsHtml = items.length ? items.map(function(lead){
         const metaBits = [lead.projectName, lead.projectType, lead.propertyAddress, lead.timeline].filter(Boolean);
@@ -1596,12 +1615,23 @@
           <div class="lc-delete" data-lead-id="${lead.id}">Remove</div>
         </div>`;
       }).join('') : '<div class="lead-empty">No leads here yet.</div>';
-      const isLast = stage === LEAD_STAGES[LEAD_STAGES.length - 1];
-      return `<div class="lead-column${isLast ? ' lead-column-last' : ''}" data-stage="${stage}">
+      return `<div class="lead-column" data-stage="${stage}">
         <div class="lead-column-header"><span class="name" style="color:${LEAD_STAGE_COLORS[stage]};">${stage}</span><span class="count">${items.length}</span></div>
         <div class="lead-column-scroll">${cardsHtml}</div>
       </div>`;
-    }).join('');
+    });
+    // Grouped into two wrappers (left: Fresh/Hot, right: Warm/Converted/Lost)
+    // so narrower layouts can stack each side by its own height — see the
+    // .leads-col CSS for how this differs between the desktop grid and the
+    // 2-column masonry used on tablet/mobile.
+    const leftStages = ["Fresh", "Hot"];
+    const byStage = {};
+    LEAD_STAGES.forEach((stage, i) => { byStage[stage] = columnsHtml[i]; });
+    const leftHtml = leftStages.map(s => byStage[s]).join('');
+    const rightHtml = LEAD_STAGES.filter(s => !leftStages.includes(s)).map(s => byStage[s]).join('');
+    leadsBoard.innerHTML =
+      `<div class="leads-col leads-col-a">${leftHtml}</div>` +
+      `<div class="leads-col leads-col-b">${rightHtml}</div>`;
 
     // Restore scroll positions now that the new elements exist.
     leadsBoard.querySelectorAll('.lead-column').forEach(function(col){
