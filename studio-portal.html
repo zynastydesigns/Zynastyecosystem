@@ -310,7 +310,7 @@
       </div>
     </div>
     <button class="btn ghost" id="headerBack" style="display:none;background:var(--ink-2);color:var(--paper);border-color:var(--line-dark);">← Back to Project</button>
-    <a class="btn" href="crm-portal.html" style="flex-shrink:0;">← Back to CRM</a>
+    <a class="btn" id="headerCrmLink" href="crm-portal.html" style="flex-shrink:0;">← Back to CRM</a>
   </div>
 </header>
 
@@ -593,7 +593,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {} };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, showDsRoomPicker: false, dsRoomPickerName: "" };
 
 function showToast(msg, isError){
   state.toast = { msg, isError: !!isError };
@@ -1290,11 +1290,10 @@ function attachDesignStudioHandlers(){
   });
 
   const addRoomBtn = document.getElementById("dsAddRoomBtn");
-  if(addRoomBtn) addRoomBtn.onclick = async ()=>{
-    const data = designStudioTabData(p, state.designStudioTab);
-    data.rooms.push({ id: newRoomId(), name: "New Room", images: [] });
+  if(addRoomBtn) addRoomBtn.onclick = ()=>{
+    state.showDsRoomPicker = true;
+    state.dsRoomPickerName = "";
     render();
-    await saveProjects();
   };
 
   document.querySelectorAll(".ds-room-name").forEach(inp=>{
@@ -1900,6 +1899,55 @@ function attachQuotationHandlers(){
   }
 }
 
+function renderDsRoomPicker(){
+  const existing = document.getElementById("dsRoomPickerOverlay");
+  if(existing) existing.remove();
+  if(!state.showDsRoomPicker) return;
+
+  const html = `
+  <div class="picker-overlay" id="dsRoomPickerOverlay">
+    <div class="picker-box">
+      <h2>Add Room</h2>
+      <div class="room-type-grid">
+        ${ROOM_TYPES.map(rt=>`<button type="button" class="room-type-btn" data-room-name="${escapeAttr(rt)}">${escapeHtml(rt)}</button>`).join("")}
+      </div>
+      <div class="field full">
+        <label>Or Custom Room Name</label>
+        <input type="text" id="customDsRoomName" placeholder="e.g. Guest Bedroom" value="${escapeAttr(state.dsRoomPickerName||"")}">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="dsRoomPickerClose">Cancel</button>
+        <button type="button" class="btn" id="dsRoomPickerAddCustom">Add Room</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+
+  const overlayEl = document.getElementById("dsRoomPickerOverlay");
+  const closePicker = ()=>{ state.showDsRoomPicker=false; overlayEl.remove(); };
+  overlayEl.addEventListener("click",(e)=>{ if(e.target.id==="dsRoomPickerOverlay") closePicker(); });
+  document.getElementById("dsRoomPickerClose").onclick = closePicker;
+
+  const addRoomWithName = async (name)=>{
+    const trimmed = (name||"").trim();
+    if(!trimmed) return;
+    const p = state.projects.find(x=>x.id===state.designStudioProjectId);
+    if(!p) return;
+    const data = designStudioTabData(p, state.designStudioTab);
+    data.rooms.push({ id: newRoomId(), name: trimmed, images: [] });
+    state.showDsRoomPicker = false;
+    render();
+    await saveProjects();
+  };
+
+  document.querySelectorAll(".room-type-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=> addRoomWithName(btn.dataset.roomName));
+  });
+  const customInput = document.getElementById("customDsRoomName");
+  document.getElementById("dsRoomPickerAddCustom").onclick = ()=> addRoomWithName(customInput.value);
+  customInput.addEventListener("keydown",(e)=>{ if(e.key==="Enter") addRoomWithName(customInput.value); });
+}
+
 function renderRoomPicker(){
   const existing = document.getElementById("roomPickerOverlay");
   if(existing) existing.remove();
@@ -2141,12 +2189,20 @@ function render(){
     const staleRoomPicker = document.getElementById("roomPickerOverlay");
     if(staleRoomPicker) staleRoomPicker.remove();
   }
+  if(state.screen !== "designStudio"){
+    state.showDsRoomPicker = false;
+    const staleDsRoomPicker = document.getElementById("dsRoomPickerOverlay");
+    if(staleDsRoomPicker) staleDsRoomPicker.remove();
+  }
 
   const headerBack = document.getElementById("headerBack");
+  const headerCrmLink = document.getElementById("headerCrmLink");
   if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio"){
     headerBack.style.display = "inline-block";
+    if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
     headerBack.style.display = "none";
+    if(headerCrmLink) headerCrmLink.style.display = "inline-block";
   }
 
   if(!state.loaded){
@@ -2179,6 +2235,7 @@ function render(){
   if(state.screen === "designStudio"){
     main.innerHTML = renderDesignStudio();
     attachDesignStudioHandlers();
+    renderDsRoomPicker();
     return;
   }
 
