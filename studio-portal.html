@@ -2039,6 +2039,8 @@ function renderModal(){
     id: uid(), projectName:"", clientName:"", clientSalutation:"", clientEmail:"", clientPhone:"", propertyAddress:"", projectType:"Residential",
     status: STAGES[0], budget:"", targetCompletion:"", contractValue:"", contractSignedDate:"", contractNotes:"",
     designAgreementValue:"", designAgreementSignedDate:"", designAgreementNotes:"", designAgreementPaymentInfo:"",
+    designerName:"", designerRole:"", designerPhoto:"", designerEmail:"", designerPhone:"", designerBio:"",
+    designWelcomeSeen:false, designerIntroSeen:false,
     agreementAccepted:false, agreementAcceptedAt:"",
     quotationAccepted:false, quotationAcceptedAt:"",
     paymentStatus:"not_submitted", paymentReferenceNote:"", paymentSubmittedAt:"", paymentVerifiedAt:"", paymentRejectionNote:"",
@@ -2165,6 +2167,24 @@ function renderModal(){
             <span>${p.agreementAccepted ? `✓ Client has accepted the Design & Booking Agreement on ${escapeHtml((p.agreementAcceptedAt||"").slice(0,10))}.` : "Client has not yet accepted the Design & Booking Agreement in the portal."}</span>
             ${p.agreementAccepted ? `<button type="button" class="btn ghost" id="downloadAgreementBtn" data-id="${p.id}">Download Signed Agreement</button>` : ""}
           </div>
+        </div>` : ""}
+
+        ${STAGES.indexOf(p.status) >= STAGES.indexOf("Design Development") ? `
+        <div class="section-label">Assigned Designer</div>
+        <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Shown to the client in their portal as a profile card once they view the Design & Development stage.</div>
+        <div class="field-row">
+          <div class="field"><label>Designer Name</label><input type="text" name="designerName" value="${escapeAttr(p.designerName)}" placeholder="e.g. Ananya Rao"></div>
+          <div class="field"><label>Role / Title</label><input type="text" name="designerRole" value="${escapeAttr(p.designerRole)}" placeholder="e.g. Senior Interior Designer"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Email</label><input type="email" name="designerEmail" value="${escapeAttr(p.designerEmail)}" placeholder="designer@zynasty.com"></div>
+          <div class="field"><label>Phone</label><input type="text" name="designerPhone" value="${escapeAttr(p.designerPhone)}" placeholder="+91 …"></div>
+        </div>
+        <div class="field-row">
+          <div class="field full"><label>Photo URL (optional)</label><input type="text" name="designerPhoto" value="${escapeAttr(p.designerPhoto)}" placeholder="https://…"></div>
+        </div>
+        <div class="field-row">
+          <div class="field full"><label>Short Bio / Specialty</label><textarea name="designerBio" placeholder="A line or two about their style, specialty, or experience…">${escapeHtml(p.designerBio)}</textarea></div>
         </div>` : ""}
 
         ${STAGES.indexOf(p.status) >= 1 ? `
@@ -2319,6 +2339,14 @@ function renderModal(){
       designAgreementSignedDate: movedBackToDiscussion ? "" : (fd.has("designAgreementSignedDate") ? fd.get("designAgreementSignedDate") : p.designAgreementSignedDate),
       designAgreementNotes: fd.has("designAgreementNotes") ? fd.get("designAgreementNotes") : p.designAgreementNotes,
       designAgreementPaymentInfo: fd.has("designAgreementPaymentInfo") ? fd.get("designAgreementPaymentInfo") : p.designAgreementPaymentInfo,
+      designerName: fd.has("designerName") ? fd.get("designerName") : p.designerName,
+      designerRole: fd.has("designerRole") ? fd.get("designerRole") : p.designerRole,
+      designerPhoto: fd.has("designerPhoto") ? fd.get("designerPhoto") : p.designerPhoto,
+      designerEmail: fd.has("designerEmail") ? fd.get("designerEmail") : p.designerEmail,
+      designerPhone: fd.has("designerPhone") ? fd.get("designerPhone") : p.designerPhone,
+      designerBio: fd.has("designerBio") ? fd.get("designerBio") : p.designerBio,
+      designWelcomeSeen: movedBackToDiscussion ? false : (p.designWelcomeSeen || false),
+      designerIntroSeen: movedBackToDiscussion ? false : (p.designerIntroSeen || false),
       agreementAccepted: movedBackToDiscussion ? false : p.agreementAccepted,
       agreementAcceptedAt: movedBackToDiscussion ? "" : p.agreementAcceptedAt,
       quotationAccepted: movedBackToDiscussion ? false : p.quotationAccepted,
