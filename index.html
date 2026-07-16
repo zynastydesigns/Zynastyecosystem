@@ -462,7 +462,7 @@ function generateAgreementPdf(project){
   doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Design-Booking-Agreement.pdf");
 }
 
-let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, onboardingStep: null };
+let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, onboardingStep: null, designStep: null };
 
 // Remembers which project this browser is currently looking at, so a reload
 // (or coming back later) reopens the same project instead of asking for the
@@ -832,6 +832,59 @@ function renderClient(){
       </div>
       ${p.designAgreementNotes ? `<div class="portal-box" style="margin-top:14px;"><h3>Design Agreement Notes</h3><div style="font-size:14px;line-height:1.6;">${escapeHtml(p.designAgreementNotes)}</div></div>` : ""}`;
 
+    // ---- Design phase mini-wizard: payment thank-you → meet your designer → progress ----
+    const designWelcomeContent = `
+      <div class="portal-box" style="text-align:center;padding:40px 26px;">
+        <div style="font-size:34px;margin-bottom:12px;">🎉</div>
+        <h3 style="margin-bottom:14px;">Thank you for completing the onboarding process!</h3>
+        <div style="font-size:15px;line-height:1.75;color:var(--ink);max-width:520px;margin:0 auto;">
+          We're excited to inform you that your project has now officially moved into the <strong>Design &amp; Development</strong> stage.
+          <br><br>
+          Our team will be assigning a dedicated designer to your project shortly. Once assigned, they'll get in touch with you to understand your requirements in detail and begin creating your dream space.
+          <br><br>
+          Thank you for choosing Zynasty Design. We look forward to bringing your vision to life!
+        </div>
+        <div style="margin-top:26px;">
+          <button class="btn" id="designWelcomeNextBtn">Next →</button>
+        </div>
+      </div>`;
+
+    const hasDesigner = !!(p.designerName && p.designerName.trim());
+    const designerContent = `
+      <div class="portal-box" style="padding:30px 26px;">
+        <h3 style="text-align:center;margin-bottom:20px;">Meet Your Designer</h3>
+        ${hasDesigner ? `
+        <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;justify-content:center;text-align:left;max-width:480px;margin:0 auto;">
+          <div style="width:86px;height:86px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:32px;">
+            ${p.designerPhoto ? `<img src="${escapeAttr(p.designerPhoto)}" alt="${escapeAttr(p.designerName)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((p.designerName||"?").trim().charAt(0).toUpperCase())}
+          </div>
+          <div>
+            <div style="font-family:'Fraunces',serif;font-size:20px;">${escapeHtml(p.designerName)}</div>
+            ${p.designerRole ? `<div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--brass);text-transform:uppercase;letter-spacing:.05em;margin-top:3px;">${escapeHtml(p.designerRole)}</div>` : ""}
+            ${p.designerBio ? `<div style="font-size:13.5px;color:var(--slate);margin-top:10px;line-height:1.6;">${escapeHtml(p.designerBio)}</div>` : ""}
+            ${(p.designerEmail || p.designerPhone) ? `
+            <div style="margin-top:10px;font-size:13px;">
+              ${p.designerEmail ? `<div>✉️ ${escapeHtml(p.designerEmail)}</div>` : ""}
+              ${p.designerPhone ? `<div style="margin-top:2px;">📞 ${escapeHtml(p.designerPhone)}</div>` : ""}
+            </div>` : ""}
+          </div>
+        </div>` : `
+        <div style="text-align:center;color:var(--slate);font-size:14px;max-width:420px;margin:0 auto;">Your dedicated designer hasn't been assigned yet. Please check back soon — we'll notify you as soon as they're ready to connect.</div>`}
+        <div style="margin-top:26px;text-align:center;">
+          <button class="btn" id="designerNextBtn">Next →</button>
+        </div>
+      </div>`;
+
+    if(isDesignPhase && !state.designStep){
+      state.designStep = !p.designWelcomeSeen ? "welcome" : (!p.designerIntroSeen ? "designer" : "progress");
+    }
+    const designWizardContent = (()=>{
+      const step = state.designStep || "progress";
+      if(step === "welcome") return designWelcomeContent;
+      if(step === "designer") return designerContent;
+      return designPhaseContent; // step === "progress" — step-based progression tracker goes here (function to be added later)
+    })();
+
     const laterContent = `
       <div class="portal-grid">
         <div class="portal-box">
@@ -862,7 +915,7 @@ function renderClient(){
         <div class="addr">${escapeHtml(p.propertyAddress)||""}</div>
         ${isLost ? "" : renderRuler(p.status,true)}
       </div>
-      ${isLost ? lostContent : (isInDiscussion ? onboardingContent : (isOnboardingStage ? onboardingWizardContent : (isDesignPhase ? designPhaseContent : laterContent)))}
+      ${isLost ? lostContent : (isInDiscussion ? onboardingContent : (isOnboardingStage ? onboardingWizardContent : (isDesignPhase ? designWizardContent : laterContent)))}
     `;
   }
   return `
@@ -914,7 +967,7 @@ async function lookupProjectByCode(code){
 
 function attachClientHandlers(){
   const back = document.getElementById("backBtn");
-  if(back) back.onclick = ()=>{ state.clientResult=null; state.clientCode=""; state.clientError=""; state.clientQuotationPdf=null; state.onboardingStep=null; clearClientSession(); render(); };
+  if(back) back.onclick = ()=>{ state.clientResult=null; state.clientCode=""; state.clientError=""; state.clientQuotationPdf=null; state.onboardingStep=null; state.designStep=null; clearClientSession(); render(); };
 
   const btn = document.getElementById("lookupBtn");
   const input = document.getElementById("codeInput");
@@ -1234,6 +1287,40 @@ function attachClientHandlers(){
       render();
     };
   }
+  const designWelcomeNextBtn = document.getElementById("designWelcomeNextBtn");
+  if(designWelcomeNextBtn){
+    designWelcomeNextBtn.onclick = async ()=>{
+      const p = state.clientResult;
+      p.designWelcomeSeen = true;
+      const projIdx = state.projects.findIndex(x=>x.id===p.id);
+      if(projIdx > -1) state.projects[projIdx] = p;
+      state.designStep = "designer";
+      render();
+      try{
+        await window.storage.set(STORAGE_KEY, JSON.stringify(state.projects), true);
+      }catch(e){
+        console.error("Could not save design welcome progress", e);
+      }
+    };
+  }
+
+  const designerNextBtn = document.getElementById("designerNextBtn");
+  if(designerNextBtn){
+    designerNextBtn.onclick = async ()=>{
+      const p = state.clientResult;
+      p.designerIntroSeen = true;
+      const projIdx = state.projects.findIndex(x=>x.id===p.id);
+      if(projIdx > -1) state.projects[projIdx] = p;
+      state.designStep = "progress";
+      render();
+      try{
+        await window.storage.set(STORAGE_KEY, JSON.stringify(state.projects), true);
+      }catch(e){
+        console.error("Could not save designer intro progress", e);
+      }
+    };
+  }
+
   const callUsBtn = document.getElementById("callUsBtn");
   if(callUsBtn){
     callUsBtn.onclick = ()=>{
