@@ -328,6 +328,7 @@ window.storage = {
 const STAGES = ["In Discussion","Onboarding","Design Development","In Progress","Install & Styling","Completed"];
 const STAGE_COLORS = ["#B5654A","#C08A4E","#A9814F","#8C8F5E","#74845F","#5F7A56"];
 const STORAGE_KEY = "projects";
+const DESIGNERS_KEY = "designers";
 
 // --- Cashfree config ---
 // Replace with the URL of your deployed backend (see cashfree-backend/README.md).
@@ -462,7 +463,7 @@ function generateAgreementPdf(project){
   doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Design-Booking-Agreement.pdf");
 }
 
-let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, onboardingStep: null, designStep: null };
+let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, onboardingStep: null, designStep: null, designers: [] };
 
 // Remembers which project this browser is currently looking at, so a reload
 // (or coming back later) reopens the same project instead of asking for the
@@ -491,10 +492,23 @@ async function loadProjects(){
   render();
 }
 
+// Read-only lookup of designer profiles saved from Studio. Keeps the client
+// portal's "Meet Your Designer" card showing the latest saved photo/contact
+// info without needing to duplicate it onto every project record.
+async function loadDesigners(){
+  try{
+    const res = await window.storage.get(DESIGNERS_KEY, true);
+    state.designers = res && res.value ? JSON.parse(res.value) : [];
+  }catch(e){
+    // keep last known designers list on failure
+  }
+}
+
 // Keeps the currently-open project (and its quotation PDF) in sync with
 // whatever was last saved in Studio, without the person needing to reload.
 async function refreshCurrentProject(){
   await loadProjects();
+  await loadDesigners();
   if(state.clientResult){
     const updated = state.projects.find(p=>p.id===state.clientResult.id);
     if(updated){
@@ -849,23 +863,34 @@ function renderClient(){
         </div>
       </div>`;
 
-    const hasDesigner = !!(p.designerName && p.designerName.trim());
+    // Look up the assigned designer from the centralized Designer Profiles
+    // list (saved in Studio) so the card always reflects the latest photo,
+    // contact info, and bio — with no per-project data to go stale.
+    // Falls back to legacy per-project designer fields for older projects
+    // saved before Designer Profiles existed.
+    const profileDesigner = (state.designers||[]).find(d=>d.id===p.assignedDesignerId);
+    const resolvedDesigner = profileDesigner
+      ? { name: profileDesigner.name, role: profileDesigner.role, photo: profileDesigner.photo, email: profileDesigner.email, phone: profileDesigner.phone, bio: profileDesigner.bio }
+      : (p.designerName && p.designerName.trim()
+          ? { name: p.designerName, role: p.designerRole, photo: p.designerPhoto, email: p.designerEmail, phone: p.designerPhone, bio: p.designerBio }
+          : null);
+    const hasDesigner = !!resolvedDesigner;
     const designerContent = `
       <div class="portal-box" style="padding:30px 26px;">
         <h3 style="text-align:center;margin-bottom:20px;">Meet Your Designer</h3>
         ${hasDesigner ? `
         <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;justify-content:center;text-align:left;max-width:480px;margin:0 auto;">
           <div style="width:86px;height:86px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:32px;">
-            ${p.designerPhoto ? `<img src="${escapeAttr(p.designerPhoto)}" alt="${escapeAttr(p.designerName)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((p.designerName||"?").trim().charAt(0).toUpperCase())}
+            ${resolvedDesigner.photo ? `<img src="${escapeAttr(resolvedDesigner.photo)}" alt="${escapeAttr(resolvedDesigner.name)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((resolvedDesigner.name||"?").trim().charAt(0).toUpperCase())}
           </div>
           <div>
-            <div style="font-family:'Fraunces',serif;font-size:20px;">${escapeHtml(p.designerName)}</div>
-            ${p.designerRole ? `<div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--brass);text-transform:uppercase;letter-spacing:.05em;margin-top:3px;">${escapeHtml(p.designerRole)}</div>` : ""}
-            ${p.designerBio ? `<div style="font-size:13.5px;color:var(--slate);margin-top:10px;line-height:1.6;">${escapeHtml(p.designerBio)}</div>` : ""}
-            ${(p.designerEmail || p.designerPhone) ? `
+            <div style="font-family:'Fraunces',serif;font-size:20px;">${escapeHtml(resolvedDesigner.name)}</div>
+            ${resolvedDesigner.role ? `<div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--brass);text-transform:uppercase;letter-spacing:.05em;margin-top:3px;">${escapeHtml(resolvedDesigner.role)}</div>` : ""}
+            ${resolvedDesigner.bio ? `<div style="font-size:13.5px;color:var(--slate);margin-top:10px;line-height:1.6;">${escapeHtml(resolvedDesigner.bio)}</div>` : ""}
+            ${(resolvedDesigner.email || resolvedDesigner.phone) ? `
             <div style="margin-top:10px;font-size:13px;">
-              ${p.designerEmail ? `<div>✉️ ${escapeHtml(p.designerEmail)}</div>` : ""}
-              ${p.designerPhone ? `<div style="margin-top:2px;">📞 ${escapeHtml(p.designerPhone)}</div>` : ""}
+              ${resolvedDesigner.email ? `<div>✉️ ${escapeHtml(resolvedDesigner.email)}</div>` : ""}
+              ${resolvedDesigner.phone ? `<div style="margin-top:2px;">📞 ${escapeHtml(resolvedDesigner.phone)}</div>` : ""}
             </div>` : ""}
           </div>
         </div>` : `
@@ -1474,6 +1499,7 @@ async function handleCashfreeReturn(){
 // last signed in to (if any), before checking for a Cashfree return — a
 // completed payment redirect should win if both happen to apply at once.
 loadProjects().then(async ()=>{
+  await loadDesigners();
   const savedCode = loadClientSession();
   if(savedCode) await lookupProjectByCode(savedCode);
   await handleCashfreeReturn();

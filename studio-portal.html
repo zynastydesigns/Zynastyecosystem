@@ -557,6 +557,7 @@ function generateAgreementPdf(project){
 const STAGE_COLORS = ["#B5654A","#C08A4E","#A9814F","#8C8F5E","#74845F","#5F7A56"];
 const STORAGE_KEY = "projects";
 const PRESETS_KEY = "itemPresets";
+const DESIGNERS_KEY = "designers";
 
 const DEFAULT_PRESETS = [
   { name: "Base Unit", features: "BWR 16mm Ply with 1mm Laminate box, shutters and Soft Close Hinges (Glossy)", cat: "Modular Kitchen", unit: "sqft", rate: 1000 },
@@ -587,7 +588,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null };
 
 function showToast(msg, isError){
   state.toast = { msg, isError: !!isError };
@@ -634,6 +635,30 @@ async function saveProjects(){
   }catch(e){
     console.error("Storage error", e);
     showToast("Could not save changes. Please try again.", true);
+  }
+}
+
+function designerId(){ return "dsg_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
+
+async function loadDesigners(){
+  try{
+    const res = await window.storage.get(DESIGNERS_KEY, true);
+    state.designers = res && res.value ? JSON.parse(res.value) : [];
+  }catch(e){
+    state.designers = [];
+  }
+  state.designersLoaded = true;
+}
+
+async function saveDesigners(){
+  try{
+    const result = await window.storage.set(DESIGNERS_KEY, JSON.stringify(state.designers), true);
+    if(!result) showToast("Could not save changes. Please try again.", true);
+    return result;
+  }catch(e){
+    console.error("Storage error", e);
+    showToast("Could not save changes. Please try again.", true);
+    return null;
   }
 }
 
@@ -1802,7 +1827,7 @@ function render(){
   }
 
   const headerBack = document.getElementById("headerBack");
-  if(state.screen === "quotation" || state.screen === "presets"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers"){
     headerBack.style.display = "inline-block";
   } else {
     headerBack.style.display = "none";
@@ -1824,6 +1849,14 @@ function render(){
   if(state.screen === "presets"){
     main.innerHTML = renderPresets();
     attachPresetsHandlers();
+    return;
+  }
+
+  if(state.screen === "designers"){
+    main.innerHTML = renderDesigners();
+    attachDesignersHandlers();
+    if(state.editingDesigner !== null) renderDesignerModal();
+    renderConfirmDeleteDesigner();
     return;
   }
 
@@ -1861,6 +1894,7 @@ function renderStudio(){
         <option value="all">All statuses</option>
         ${STAGES.map(s=>`<option value="${s}" ${state.filter===s?"selected":""}>${s}</option>`).join("")}
       </select>` : ""}
+      <button class="btn ghost" id="designerProfilesBtn">Designer Profiles</button>
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
 
@@ -2035,12 +2069,203 @@ async function refreshPaymentVerificationIfEditing(){
   attachPaymentVerificationHandlers();
 }
 
+function renderDesigners(){
+  const list = state.designers || [];
+  const toolbar = `
+    <div class="toolbar">
+      <div style="flex:1;"></div>
+      <button class="btn" id="addDesignerBtn">+ Add Designer</button>
+    </div>`;
+
+  if(!list.length){
+    return `<div class="display" style="font-size:22px;margin-bottom:14px;">Designer Profiles</div>` + toolbar + `
+      <div class="empty">
+        <div class="display">No designers yet</div>
+        <div>Add your team's designers once here, then assign them to any project in one click.</div>
+      </div>`;
+  }
+
+  const cards = list.map(d=>{
+    const initial = escapeHtml((d.name||"?").trim().charAt(0).toUpperCase());
+    const isActive = d.status !== "inactive";
+    return `
+    <div class="card" data-id="${d.id}" style="cursor:default;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div style="width:52px;height:52px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:20px;">
+          ${d.photo ? `<img src="${escapeAttr(d.photo)}" style="width:100%;height:100%;object-fit:cover;">` : initial}
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div class="card-top">
+            <div>
+              <div class="card-title">${escapeHtml(d.name||"Unnamed")}</div>
+              ${d.role ? `<div class="card-client">${escapeHtml(d.role)}</div>` : ""}
+            </div>
+            <span class="pill" style="background:${isActive ? "var(--sage)" : "#8a8878"};">${isActive ? "Active" : "Inactive"}</span>
+          </div>
+          ${d.bio ? `<div style="font-size:13px;color:var(--slate);margin-top:8px;line-height:1.5;">${escapeHtml(d.bio)}</div>` : ""}
+          <div class="facts" style="grid-template-columns:1fr 1fr;">
+            <div><div class="fact-label">Email</div><div class="fact-val">${escapeHtml(d.email||"—")}</div></div>
+            <div><div class="fact-label">Phone</div><div class="fact-val">${escapeHtml(d.phone||"—")}</div></div>
+            ${d.employeeId ? `<div><div class="fact-label">Employee ID</div><div class="fact-val">${escapeHtml(d.employeeId)}</div></div>` : ""}
+          </div>
+          <div class="card-footer">
+            <button type="button" class="btn ghost toggleDesignerStatusBtn" data-id="${d.id}" style="padding:7px 12px;font-size:11px;">${isActive ? "Deactivate" : "Activate"}</button>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="icon-btn editDesignerBtn" data-id="${d.id}" title="Edit">✎ Edit</button>
+              <button type="button" class="icon-btn deleteDesignerBtn" data-id="${d.id}" title="Delete">🗑 Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<div class="display" style="font-size:22px;margin-bottom:14px;">Designer Profiles</div>` + toolbar + `<div class="grid">${cards}</div>`;
+}
+
+function attachDesignersHandlers(){
+  const addBtn = document.getElementById("addDesignerBtn");
+  if(addBtn) addBtn.onclick = ()=>{ state.editingDesigner = "new"; render(); };
+
+  document.querySelectorAll(".editDesignerBtn").forEach(b=>{
+    b.addEventListener("click", ()=>{ state.editingDesigner = b.dataset.id; render(); });
+  });
+  document.querySelectorAll(".deleteDesignerBtn").forEach(b=>{
+    b.addEventListener("click", ()=>{ state.confirmDeleteDesigner = b.dataset.id; render(); });
+  });
+  document.querySelectorAll(".toggleDesignerStatusBtn").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      const d = state.designers.find(x=>x.id===b.dataset.id);
+      if(!d) return;
+      d.status = d.status === "inactive" ? "active" : "inactive";
+      render();
+      await saveDesigners();
+    });
+  });
+}
+
+function renderDesignerModal(){
+  const existing = document.getElementById("designerOverlay");
+  if(existing) existing.remove();
+  const isNew = state.editingDesigner === "new";
+  const d = isNew ? {
+    id: designerId(), name:"", role:"", email:"", phone:"", photo:"", bio:"", employeeId:"", status:"active"
+  } : state.designers.find(x=>x.id===state.editingDesigner);
+  if(!d){ state.editingDesigner = null; return; }
+
+  const html = `
+  <div class="overlay" id="designerOverlay">
+    <div class="modal">
+      <h2>${isNew ? "Add Designer" : "Edit Designer"}</h2>
+      <form id="designerForm">
+        <div id="designerFormError" style="display:none;color:var(--clay);font-size:13px;margin-bottom:12px;font-family:'IBM Plex Mono',monospace;"></div>
+        <div class="field-row">
+          <div class="field"><label>Full Name</label><input type="text" name="name" value="${escapeAttr(d.name)}" placeholder="e.g. Ananya Rao"></div>
+          <div class="field"><label>Designation / Role</label><input type="text" name="role" value="${escapeAttr(d.role)}" placeholder="e.g. Senior Interior Designer"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Email Address</label><input type="email" name="email" value="${escapeAttr(d.email)}" placeholder="designer@zynasty.com"></div>
+          <div class="field"><label>Phone Number</label><input type="text" name="phone" value="${escapeAttr(d.phone)}" placeholder="+91 …"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Employee ID (optional)</label><input type="text" name="employeeId" value="${escapeAttr(d.employeeId)}" placeholder="e.g. ZYN-014"></div>
+          <div class="field"><label>Status</label>
+            <select name="status">
+              <option value="active" ${d.status!=="inactive"?"selected":""}>Active</option>
+              <option value="inactive" ${d.status==="inactive"?"selected":""}>Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field full"><label>Profile Photo URL (optional)</label><input type="text" name="photo" value="${escapeAttr(d.photo)}" placeholder="https://…"></div>
+        </div>
+        <div class="field-row">
+          <div class="field full"><label>Short Bio / Specialty</label><textarea name="bio" placeholder="A line or two about their style, specialty, or experience…">${escapeHtml(d.bio)}</textarea></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" id="designerCancelBtn">Cancel</button>
+          <button type="submit" class="btn">${isNew ? "Add Designer" : "Save Changes"}</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+
+  document.getElementById("designerCancelBtn").onclick = ()=>{ state.editingDesigner = null; document.getElementById("designerOverlay").remove(); };
+  document.getElementById("designerOverlay").addEventListener("click",(e)=>{ if(e.target.id==="designerOverlay"){ state.editingDesigner=null; e.target.remove(); }});
+
+  document.getElementById("designerForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const name = (fd.get("name")||"").trim();
+    const errEl = document.getElementById("designerFormError");
+    if(!name){
+      errEl.textContent = "Please enter the designer's full name to continue.";
+      errEl.style.display = "block";
+      document.querySelector('[name="name"]').focus();
+      return;
+    }
+    errEl.style.display = "none";
+    const updated = {
+      id: d.id,
+      name,
+      role: fd.get("role")||"",
+      email: fd.get("email")||"",
+      phone: fd.get("phone")||"",
+      photo: fd.get("photo")||"",
+      bio: fd.get("bio")||"",
+      employeeId: fd.get("employeeId")||"",
+      status: fd.get("status")||"active"
+    };
+    if(isNew){ state.designers.push(updated); } else {
+      const i = state.designers.findIndex(x=>x.id===d.id);
+      state.designers[i] = updated;
+    }
+    state.editingDesigner = null;
+    document.getElementById("designerOverlay").remove();
+    render();
+    await saveDesigners();
+  };
+}
+
+function renderConfirmDeleteDesigner(){
+  const existing = document.getElementById("confirmDesignerOverlay");
+  if(existing) existing.remove();
+  if(!state.confirmDeleteDesigner) return;
+  const d = state.designers.find(x=>x.id===state.confirmDeleteDesigner);
+  if(!d){ state.confirmDeleteDesigner = null; return; }
+  const assignedCount = state.projects.filter(p=>p.assignedDesignerId===d.id).length;
+  const html = `
+  <div class="overlay" id="confirmDesignerOverlay">
+    <div class="modal confirm-box">
+      <h2>Delete designer?</h2>
+      <p>This will permanently remove "${escapeHtml(d.name)}" from Designer Profiles.${assignedCount ? ` They are currently assigned to ${assignedCount} project${assignedCount===1?"":"s"} — those projects will show as unassigned until you pick a new designer.` : ""} This cannot be undone.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="confirmDesignerCancel">Cancel</button>
+        <button type="button" class="btn danger" id="confirmDesignerDeleteBtn" style="background:var(--clay);color:#fff;border:none;">Delete</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+  document.getElementById("confirmDesignerCancel").onclick = ()=>{ state.confirmDeleteDesigner=null; document.getElementById("confirmDesignerOverlay").remove(); };
+  document.getElementById("confirmDesignerOverlay").addEventListener("click",(e)=>{ if(e.target.id==="confirmDesignerOverlay"){ state.confirmDeleteDesigner=null; e.target.remove(); }});
+  document.getElementById("confirmDesignerDeleteBtn").onclick = async ()=>{
+    const id = state.confirmDeleteDesigner;
+    state.designers = state.designers.filter(x=>x.id!==id);
+    state.confirmDeleteDesigner = null;
+    document.getElementById("confirmDesignerOverlay").remove();
+    render();
+    await saveDesigners();
+  };
+}
+
 function renderModal(){
   const p = state.editing === "new" ? {
     id: uid(), projectName:"", clientName:"", clientSalutation:"", clientEmail:"", clientPhone:"", propertyAddress:"", projectType:"Residential",
     status: STAGES[0], budget:"", targetCompletion:"", contractValue:"", contractSignedDate:"", contractNotes:"",
     designAgreementValue:"", designAgreementSignedDate:"", designAgreementNotes:"", designAgreementPaymentInfo:"",
     designerName:"", designerRole:"", designerPhoto:"", designerEmail:"", designerPhone:"", designerBio:"",
+    assignedDesignerId:"",
     designWelcomeSeen:false, designerIntroSeen:false,
     agreementAccepted:false, agreementAcceptedAt:"",
     quotationAccepted:false, quotationAcceptedAt:"",
@@ -2174,19 +2399,34 @@ function renderModal(){
         <div class="section-label">Assigned Designer</div>
         <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Shown to the client in their portal as a profile card once they view the Design & Development stage.</div>
         <div class="field-row">
-          <div class="field"><label>Designer Name</label><input type="text" name="designerName" value="${escapeAttr(p.designerName)}" placeholder="e.g. Ananya Rao"></div>
-          <div class="field"><label>Role / Title</label><input type="text" name="designerRole" value="${escapeAttr(p.designerRole)}" placeholder="e.g. Senior Interior Designer"></div>
+          <div class="field full">
+            <label>Assign Designer</label>
+            <select name="assignedDesignerId" id="assignedDesignerSelect">
+              <option value="">— Select Designer —</option>
+              ${(state.designers||[]).filter(d=>d.status!=="inactive" || d.id===p.assignedDesignerId).map(d=>`<option value="${d.id}" ${p.assignedDesignerId===d.id?"selected":""}>${escapeHtml(d.name)}${d.status==="inactive"?" (Inactive)":""}</option>`).join("")}
+            </select>
+          </div>
         </div>
-        <div class="field-row">
-          <div class="field"><label>Email</label><input type="email" name="designerEmail" value="${escapeAttr(p.designerEmail)}" placeholder="designer@zynasty.com"></div>
-          <div class="field"><label>Phone</label><input type="text" name="designerPhone" value="${escapeAttr(p.designerPhone)}" placeholder="+91 …"></div>
+        <div id="assignedDesignerPreview">
+        ${(()=>{
+          const assigned = (state.designers||[]).find(d=>d.id===p.assignedDesignerId);
+          if(!assigned){
+            return !((state.designers||[]).length) ? `<div style="font-size:12.5px;color:var(--slate);margin-top:4px;">No designer profiles yet — create one to assign.</div>` : "";
+          }
+          const contactLine = [assigned.role, assigned.email, assigned.phone].filter(Boolean).join(" · ");
+          return `
+          <div style="display:flex;gap:14px;align-items:center;margin-top:6px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px;">
+            <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:18px;">
+              ${assigned.photo ? `<img src="${escapeAttr(assigned.photo)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((assigned.name||"?").trim().charAt(0).toUpperCase())}
+            </div>
+            <div style="font-size:13px;">
+              <div style="font-weight:600;">${escapeHtml(assigned.name)}</div>
+              ${contactLine ? `<div style="color:var(--slate);">${escapeHtml(contactLine)}</div>` : ""}
+            </div>
+          </div>`;
+        })()}
         </div>
-        <div class="field-row">
-          <div class="field full"><label>Photo URL (optional)</label><input type="text" name="designerPhoto" value="${escapeAttr(p.designerPhoto)}" placeholder="https://…"></div>
-        </div>
-        <div class="field-row">
-          <div class="field full"><label>Short Bio / Specialty</label><textarea name="designerBio" placeholder="A line or two about their style, specialty, or experience…">${escapeHtml(p.designerBio)}</textarea></div>
-        </div>` : ""}
+        <div style="margin-top:10px;"><button type="button" class="btn ghost" id="manageDesignersFromModalBtn" style="padding:7px 12px;font-size:11.5px;">Manage Designer Profiles →</button></div>` : ""}
 
         ${STAGES.indexOf(p.status) >= 1 ? `
         <div class="section-label">Payment Verification</div>
@@ -2238,6 +2478,34 @@ function renderModal(){
 
   document.getElementById("cancelBtn").onclick = ()=>{ state.editing=null; document.getElementById("overlay").remove(); };
   document.getElementById("overlay").addEventListener("click",(e)=>{ if(e.target.id==="overlay"){ state.editing=null; e.target.remove(); }});
+  const assignedDesignerSelect = document.getElementById("assignedDesignerSelect");
+  if(assignedDesignerSelect){
+    assignedDesignerSelect.onchange = (e)=>{
+      const preview = document.getElementById("assignedDesignerPreview");
+      const assigned = (state.designers||[]).find(d=>d.id===e.target.value);
+      if(!assigned){ preview.innerHTML = ""; return; }
+      const contactLine = [assigned.role, assigned.email, assigned.phone].filter(Boolean).join(" · ");
+      preview.innerHTML = `
+        <div style="display:flex;gap:14px;align-items:center;margin-top:6px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px;">
+          <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:18px;">
+            ${assigned.photo ? `<img src="${escapeAttr(assigned.photo)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((assigned.name||"?").trim().charAt(0).toUpperCase())}
+          </div>
+          <div style="font-size:13px;">
+            <div style="font-weight:600;">${escapeHtml(assigned.name)}</div>
+            ${contactLine ? `<div style="color:var(--slate);">${escapeHtml(contactLine)}</div>` : ""}
+          </div>
+        </div>`;
+    };
+  }
+  const manageDesignersFromModalBtn = document.getElementById("manageDesignersFromModalBtn");
+  if(manageDesignersFromModalBtn){
+    manageDesignersFromModalBtn.onclick = ()=>{
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      state.screen = "designers";
+      render();
+    };
+  }
   const openQuoteBtn = document.getElementById("openQuoteBtn");
   if(openQuoteBtn){
     openQuoteBtn.onclick = async ()=>{
@@ -2340,12 +2608,13 @@ function renderModal(){
       designAgreementSignedDate: movedBackToDiscussion ? "" : (fd.has("designAgreementSignedDate") ? fd.get("designAgreementSignedDate") : p.designAgreementSignedDate),
       designAgreementNotes: fd.has("designAgreementNotes") ? fd.get("designAgreementNotes") : p.designAgreementNotes,
       designAgreementPaymentInfo: fd.has("designAgreementPaymentInfo") ? fd.get("designAgreementPaymentInfo") : p.designAgreementPaymentInfo,
-      designerName: fd.has("designerName") ? fd.get("designerName") : p.designerName,
-      designerRole: fd.has("designerRole") ? fd.get("designerRole") : p.designerRole,
-      designerPhoto: fd.has("designerPhoto") ? fd.get("designerPhoto") : p.designerPhoto,
-      designerEmail: fd.has("designerEmail") ? fd.get("designerEmail") : p.designerEmail,
-      designerPhone: fd.has("designerPhone") ? fd.get("designerPhone") : p.designerPhone,
-      designerBio: fd.has("designerBio") ? fd.get("designerBio") : p.designerBio,
+      designerName: p.designerName,
+      designerRole: p.designerRole,
+      designerPhoto: p.designerPhoto,
+      designerEmail: p.designerEmail,
+      designerPhone: p.designerPhone,
+      designerBio: p.designerBio,
+      assignedDesignerId: fd.has("assignedDesignerId") ? fd.get("assignedDesignerId") : (p.assignedDesignerId || ""),
       designWelcomeSeen: movedBackToDiscussion ? false : (p.designWelcomeSeen || false),
       designerIntroSeen: movedBackToDiscussion ? false : (p.designerIntroSeen || false),
       agreementAccepted: movedBackToDiscussion ? false : p.agreementAccepted,
@@ -2396,6 +2665,12 @@ function attachStudioHandlers(){
   if(s) s.oninput = (e)=>{ state.search = e.target.value; render(); s.focus(); s.setSelectionRange(s.value.length,s.value.length); };
   if(f) f.onchange = (e)=>{ state.filter = e.target.value; render(); };
   if(n) n.onclick = ()=>{ state.editing = "new"; render(); };
+  const dp = document.getElementById("designerProfilesBtn");
+  if(dp) dp.onclick = async ()=>{
+    state.screen = "designers";
+    render();
+    if(!state.designersLoaded){ await loadDesigners(); render(); }
+  };
 
   document.querySelectorAll(".section-tab").forEach(tab=>{
     tab.addEventListener("click", ()=>{
@@ -2457,6 +2732,13 @@ function escapeHtml(str){
 function escapeAttr(str){ return escapeHtml(str); }
 
 document.getElementById("headerBack").addEventListener("click", ()=>{
+  if(state.screen === "designers"){
+    state.screen = "main";
+    state.editingDesigner = null;
+    state.confirmDeleteDesigner = null;
+    render();
+    return;
+  }
   if(state.screen === "presets"){
     if(state.presetsOrigin === "quotation" && state.quotationProjectId){
       state.screen = "quotation";
@@ -2511,6 +2793,7 @@ async function refreshProjectsIfSafe(){
   }
   showApp();
   loadProjects();
+  loadDesigners();
   setInterval(refreshProjectsIfSafe, 8000);
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refreshProjectsIfSafe(); });
   window.addEventListener("focus", refreshProjectsIfSafe);
