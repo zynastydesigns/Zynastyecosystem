@@ -560,6 +560,34 @@ function copyToClipboard(text, btnEl){
 }
 window.copyToClipboard = copyToClipboard;
 
+async function downloadDesignPdf(kind, projectId, btnEl, noteEl, onSuccess){
+  const key = "design-pdf:" + kind + ":" + projectId;
+  const originalText = btnEl.textContent;
+  btnEl.disabled = true;
+  btnEl.textContent = "Preparing…";
+  if(noteEl) noteEl.textContent = "";
+  try{
+    const res = await window.storage.get(key, true);
+    if(!res || !res.value){
+      if(noteEl) noteEl.textContent = "Not ready yet — please check back soon.";
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = res.value;
+    a.download = (kind === "material" ? "Material-Selection" : "3D-Design-Renders") + ".pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if(typeof onSuccess === "function") await onSuccess();
+  }catch(e){
+    console.error(e);
+    if(noteEl) noteEl.textContent = "Could not download right now — please try again.";
+  }finally{
+    btnEl.disabled = false;
+    btnEl.textContent = originalText;
+  }
+}
+
 function fmtMoney(v){
   if(v === "" || v === null || v === undefined) return "—";
   const n = Number(v);
@@ -846,23 +874,6 @@ function renderClient(){
       </div>
       ${p.designAgreementNotes ? `<div class="portal-box" style="margin-top:14px;"><h3>Design Agreement Notes</h3><div style="font-size:14px;line-height:1.6;">${escapeHtml(p.designAgreementNotes)}</div></div>` : ""}`;
 
-    // ---- Design phase mini-wizard: payment thank-you → meet your designer → progress ----
-    const designWelcomeContent = `
-      <div class="portal-box" style="text-align:center;padding:40px 26px;">
-        <div style="font-size:34px;margin-bottom:12px;">🎉</div>
-        <h3 style="margin-bottom:14px;">Thank you for completing the onboarding process!</h3>
-        <div style="font-size:15px;line-height:1.75;color:var(--ink);max-width:520px;margin:0 auto;">
-          We're excited to inform you that your project has now officially moved into the <strong>Design &amp; Development</strong> stage.
-          <br><br>
-          Our team will be assigning a dedicated designer to your project shortly. Once assigned, they'll get in touch with you to understand your requirements in detail and begin creating your dream space.
-          <br><br>
-          Thank you for choosing Zynasty Design. We look forward to bringing your vision to life!
-        </div>
-        <div style="margin-top:26px;">
-          <button class="btn" id="designWelcomeNextBtn">Next →</button>
-        </div>
-      </div>`;
-
     // Look up the assigned designer from the centralized Designer Profiles
     // list (saved in Studio) so the card always reflects the latest photo,
     // contact info, and bio — with no per-project data to go stale.
@@ -875,6 +886,26 @@ function renderClient(){
           ? { name: p.designerName, role: p.designerRole, photo: p.designerPhoto, email: p.designerEmail, phone: p.designerPhone, bio: p.designerBio }
           : null);
     const hasDesigner = !!resolvedDesigner;
+
+    // ---- Design phase mini-wizard: onboarding thank-you → meet your designer → progress ----
+    const designWelcomeContent = `
+      <div class="portal-box" style="text-align:center;padding:40px 26px;">
+        <div style="font-size:34px;margin-bottom:12px;">🎉</div>
+        <h3 style="margin-bottom:14px;">Thank you for completing the onboarding process!</h3>
+        <div style="font-size:15px;line-height:1.75;color:var(--ink);max-width:520px;margin:0 auto;">
+          We're excited to inform you that your project has now officially moved into the <strong>Design &amp; Development</strong> stage.
+          <br><br>
+          Our team will be assigning a dedicated designer to your project shortly. Once assigned, they'll get in touch with you to understand your requirements in detail and begin creating your dream space.
+          <br><br>
+          Thank you for choosing Zynasty Design. We look forward to bringing your vision to life!
+        </div>
+        ${hasDesigner ? `
+        <div style="margin-top:26px;">
+          <button class="btn" id="designWelcomeNextBtn">Next →</button>
+        </div>` : `
+        <div style="margin-top:26px;font-size:13px;color:var(--slate);font-family:'IBM Plex Mono',monospace;">Sit tight — this page will update as soon as your designer is assigned.</div>`}
+      </div>`;
+
     const designerContent = `
       <div class="portal-box" style="padding:30px 26px;">
         <h3 style="text-align:center;margin-bottom:20px;">Meet Your Designer</h3>
@@ -903,11 +934,94 @@ function renderClient(){
     if(isDesignPhase && !state.designStep){
       state.designStep = !p.designWelcomeSeen ? "welcome" : (!p.designerIntroSeen ? "designer" : "progress");
     }
+
+    // ---- Step-based progression tracker: Site Measurement → 3D Renders → Material Selection ----
+    const progressStep = p.progressStep || "siteVisit";
+    const siteVisitBooked = !!(p.siteVisitDate && p.siteVisitTime);
+    const materialSlotBooked = !!(p.materialSlotDate && p.materialSlotTime);
+    const bookingMinDate = (()=>{ const d = new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
+    const fieldStyle = "width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;";
+
+    const siteMeasurementCompleted = !!p.siteMeasurementCompleted;
+    const materialDownloaded = !!p.materialSelectionDownloadedAt;
+
+    const stepPillsHtml = `
+      <div style="display:flex;justify-content:center;gap:8px;margin-bottom:22px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;flex-wrap:wrap;">
+        <span style="padding:6px 12px;border-radius:999px;background:${progressStep==='siteVisit' ? "var(--ink)" : "#eee"};color:${progressStep==='siteVisit' ? "#fff" : "var(--slate)"};">1 · Site Measurement</span>
+        <span style="padding:6px 12px;border-radius:999px;background:${progressStep==='renders' ? "var(--ink)" : "#eee"};color:${progressStep==='renders' ? "#fff" : "var(--slate)"};">2 · 3D Renders</span>
+        <span style="padding:6px 12px;border-radius:999px;background:${(progressStep==='material'||progressStep==='done') ? "var(--ink)" : "#eee"};color:${(progressStep==='material'||progressStep==='done') ? "#fff" : "var(--slate)"};">3 · Material Selection</span>
+      </div>`;
+
+    let stepBodyHtml = "";
+    if(progressStep === "siteVisit"){
+      stepBodyHtml = `
+      <div class="portal-box" style="padding:30px 26px;">
+        <h3 style="text-align:center;margin-bottom:6px;">Book a Site Measurement Visit</h3>
+        <div style="text-align:center;color:var(--slate);font-size:13.5px;margin-bottom:22px;">Pick a date and time that works for you — our team will confirm shortly after.</div>
+        ${siteVisitBooked ? `
+        <div style="max-width:360px;margin:0 auto;text-align:center;padding:16px;background:${siteMeasurementCompleted ? "#eef4ec" : "#fbf5e6"};border:1px solid ${siteMeasurementCompleted ? "#b9d3b1" : "#e6d290"};border-radius:8px;font-size:14px;color:${siteMeasurementCompleted ? "#3a5c33" : "#8a6d1f"};">
+          ${siteMeasurementCompleted
+            ? `✓ Site measurement completed.`
+            : `✓ Site measurement visit booked for ${fmtDate(p.siteVisitDate)} at ${escapeHtml(p.siteVisitTime)}. We'll confirm here once our team has completed the visit.`}
+        </div>
+        <div style="text-align:center;margin-top:14px;"><button type="button" class="btn ghost" id="changeSiteVisitBtn" style="padding:7px 14px;font-size:12px;">Change Slot</button></div>
+        ${siteMeasurementCompleted ? `<div style="text-align:center;margin-top:20px;"><button class="btn" id="siteVisitNextBtn">Next →</button></div>` : ""}` : `
+        <form id="siteVisitForm" style="max-width:340px;margin:0 auto;">
+          <div style="margin-bottom:14px;"><label style="display:block;font-size:12px;color:var(--slate);margin-bottom:5px;">Preferred Date</label><input type="date" name="date" min="${bookingMinDate}" required style="${fieldStyle}"></div>
+          <div style="margin-bottom:18px;"><label style="display:block;font-size:12px;color:var(--slate);margin-bottom:5px;">Preferred Time</label><input type="time" name="time" required style="${fieldStyle}"></div>
+          <div style="text-align:center;"><button type="submit" class="btn">Book Site Measurement Visit</button></div>
+        </form>`}
+      </div>`;
+    } else if(progressStep === "renders"){
+      stepBodyHtml = `
+      <div class="portal-box" style="padding:30px 26px;text-align:center;">
+        <h3 style="margin-bottom:10px;">Download Your 3D Renders</h3>
+        <div style="color:var(--slate);font-size:13.5px;max-width:420px;margin:0 auto 22px;">Take a look at your dedicated 3D design renders below.</div>
+        <button type="button" class="btn" id="downloadRendersBtn">⬇ Download 3D Renders (PDF)</button>
+        <div id="rendersDownloadNote" style="margin-top:10px;font-size:12.5px;color:var(--slate);"></div>
+        <div style="margin-top:26px;"><button class="btn" id="rendersNextBtn">Next →</button></div>
+      </div>`;
+    } else if(progressStep === "material"){
+      stepBodyHtml = `
+      <div class="portal-box" style="padding:30px 26px;">
+        <h3 style="text-align:center;margin-bottom:6px;">Material Selection</h3>
+        <div style="text-align:center;color:var(--slate);font-size:13.5px;margin-bottom:22px;">Book a slot to finalize materials with your designer, and download the material selection sheet below.</div>
+        <div style="text-align:center;margin-bottom:24px;">
+          <button type="button" class="btn" id="downloadMaterialBtn">⬇ Download Material Selection (PDF)</button>
+          <div id="materialDownloadNote" style="margin-top:10px;font-size:12.5px;color:var(--slate);">${materialDownloaded ? "✓ Downloaded — you're all set." : ""}</div>
+        </div>
+        ${materialSlotBooked ? `
+        <div style="max-width:360px;margin:0 auto;text-align:center;padding:16px;background:#eef4ec;border:1px solid #b9d3b1;border-radius:8px;font-size:14px;color:#3a5c33;">
+          ✓ Material selection slot booked for ${fmtDate(p.materialSlotDate)} at ${escapeHtml(p.materialSlotTime)} — ${p.materialSlotType === "vendor" ? "at our vendor showroom" : "on-site"}.
+        </div>
+        <div style="text-align:center;margin-top:14px;"><button type="button" class="btn ghost" id="changeMaterialSlotBtn" style="padding:7px 14px;font-size:12px;">Change Slot</button></div>` : `
+        <form id="materialSlotForm" style="max-width:340px;margin:0 auto;">
+          <div style="margin-bottom:14px;"><label style="display:block;font-size:12px;color:var(--slate);margin-bottom:5px;">Preferred Date</label><input type="date" name="date" min="${bookingMinDate}" required style="${fieldStyle}"></div>
+          <div style="margin-bottom:18px;"><label style="display:block;font-size:12px;color:var(--slate);margin-bottom:5px;">Preferred Time</label><input type="time" name="time" required style="${fieldStyle}"></div>
+          <div style="margin-bottom:18px;text-align:left;">
+            <label style="display:block;font-size:12px;color:var(--slate);margin-bottom:7px;">Where would you like to meet?</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:8px;cursor:pointer;"><input type="radio" name="meetingType" value="onsite" checked style="width:auto;">On-Site</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;"><input type="radio" name="meetingType" value="vendor" style="width:auto;">Visit Our Vendor</label>
+          </div>
+          <div style="text-align:center;"><button type="submit" class="btn">Book Slot</button></div>
+        </form>`}
+        ${materialDownloaded ? `<div style="text-align:center;margin-top:20px;"><button class="btn" id="materialNextBtn">Next →</button></div>` : ""}
+      </div>`;
+    } else {
+      stepBodyHtml = `
+      <div class="portal-box" style="padding:30px 26px;text-align:center;">
+        <h3 style="margin-bottom:10px;">You're All Set</h3>
+        <div style="color:var(--slate);font-size:13.5px;max-width:420px;margin:0 auto;">Your design is finalized. Our team will be in touch as we move into production.</div>
+      </div>`;
+    }
+
+    const progressionContent = stepPillsHtml + stepBodyHtml;
+
     const designWizardContent = (()=>{
       const step = state.designStep || "progress";
       if(step === "welcome") return designWelcomeContent;
       if(step === "designer") return designerContent;
-      return designPhaseContent; // step === "progress" — step-based progression tracker goes here (function to be added later)
+      return progressionContent; // step === "progress"
     })();
 
     const laterContent = `
@@ -1343,6 +1457,106 @@ function attachClientHandlers(){
       }catch(e){
         console.error("Could not save designer intro progress", e);
       }
+    };
+  }
+
+  // ---- Step-based progression handlers: Site Measurement → 3D Renders → Material Selection ----
+  async function saveClientProject(p){
+    const projIdx = state.projects.findIndex(x=>x.id===p.id);
+    if(projIdx > -1) state.projects[projIdx] = p;
+    try{
+      await window.storage.set(STORAGE_KEY, JSON.stringify(state.projects), true);
+    }catch(e){
+      console.error("Could not save progress", e);
+    }
+  }
+
+  const siteVisitForm = document.getElementById("siteVisitForm");
+  if(siteVisitForm){
+    siteVisitForm.onsubmit = async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const p = state.clientResult;
+      p.siteVisitDate = fd.get("date");
+      p.siteVisitTime = fd.get("time");
+      p.siteVisitBookedAt = new Date().toISOString();
+      render();
+      await saveClientProject(p);
+    };
+  }
+  const changeSiteVisitBtn = document.getElementById("changeSiteVisitBtn");
+  if(changeSiteVisitBtn){
+    changeSiteVisitBtn.onclick = async ()=>{
+      const p = state.clientResult;
+      p.siteVisitDate = ""; p.siteVisitTime = ""; p.siteVisitBookedAt = "";
+      p.siteMeasurementCompleted = false; p.siteMeasurementCompletedAt = "";
+      render();
+      await saveClientProject(p);
+    };
+  }
+  const siteVisitNextBtn = document.getElementById("siteVisitNextBtn");
+  if(siteVisitNextBtn){
+    siteVisitNextBtn.onclick = async ()=>{
+      const p = state.clientResult;
+      p.progressStep = "renders";
+      render();
+      await saveClientProject(p);
+    };
+  }
+  const downloadRendersBtn = document.getElementById("downloadRendersBtn");
+  if(downloadRendersBtn){
+    downloadRendersBtn.onclick = ()=> downloadDesignPdf("threeD", state.clientResult.id, downloadRendersBtn, document.getElementById("rendersDownloadNote"));
+  }
+  const rendersNextBtn = document.getElementById("rendersNextBtn");
+  if(rendersNextBtn){
+    rendersNextBtn.onclick = async ()=>{
+      const p = state.clientResult;
+      p.progressStep = "material";
+      render();
+      await saveClientProject(p);
+    };
+  }
+  const downloadMaterialBtn = document.getElementById("downloadMaterialBtn");
+  if(downloadMaterialBtn){
+    downloadMaterialBtn.onclick = ()=> downloadDesignPdf("material", state.clientResult.id, downloadMaterialBtn, document.getElementById("materialDownloadNote"), async ()=>{
+      const p = state.clientResult;
+      if(!p.materialSelectionDownloadedAt){
+        p.materialSelectionDownloadedAt = new Date().toISOString();
+        await saveClientProject(p);
+      }
+      render();
+    });
+  }
+  const materialNextBtn = document.getElementById("materialNextBtn");
+  if(materialNextBtn){
+    materialNextBtn.onclick = async ()=>{
+      const p = state.clientResult;
+      p.progressStep = "done";
+      render();
+      await saveClientProject(p);
+    };
+  }
+  const materialSlotForm = document.getElementById("materialSlotForm");
+  if(materialSlotForm){
+    materialSlotForm.onsubmit = async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const p = state.clientResult;
+      p.materialSlotDate = fd.get("date");
+      p.materialSlotTime = fd.get("time");
+      p.materialSlotType = fd.get("meetingType") || "onsite";
+      p.materialSlotBookedAt = new Date().toISOString();
+      render();
+      await saveClientProject(p);
+    };
+  }
+  const changeMaterialSlotBtn = document.getElementById("changeMaterialSlotBtn");
+  if(changeMaterialSlotBtn){
+    changeMaterialSlotBtn.onclick = async ()=>{
+      const p = state.clientResult;
+      p.materialSlotDate = ""; p.materialSlotTime = ""; p.materialSlotBookedAt = ""; p.materialSlotType = "";
+      render();
+      await saveClientProject(p);
     };
   }
 

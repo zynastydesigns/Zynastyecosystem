@@ -122,6 +122,11 @@
   .code-chip{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--paper-2);padding:5px 9px;border-radius:5px;letter-spacing:.04em;}
   .icon-btn{background:none;border:none;color:var(--slate);cursor:pointer;font-size:13px;padding:4px 6px;}
   .icon-btn:hover{color:var(--clay);}
+  .ds-thumb{position:relative;aspect-ratio:1/1;border-radius:6px;overflow:hidden;background:var(--paper);border:1px solid var(--line);}
+  .ds-thumb-remove{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(8,40,69,0.75);color:#fff;font-size:11px;cursor:pointer;line-height:20px;padding:0;}
+  .ds-thumb-remove:hover{background:var(--clay);}
+  .ds-thumb-add{aspect-ratio:1/1;border-radius:6px;border:1.5px dashed var(--line);display:flex;align-items:center;justify-content:center;text-align:center;font-size:11.5px;color:var(--slate);cursor:pointer;padding:8px;}
+  .ds-thumb-add:hover{border-color:var(--brass);color:var(--brass);}
 
   /* ---- Modal / editor ---- */
   .overlay{position:fixed;inset:0;background:rgba(27,36,48,.5);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow-y:auto;z-index:50;}
@@ -588,7 +593,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {} };
 
 function showToast(msg, isError){
   state.toast = { msg, isError: !!isError };
@@ -1067,6 +1072,317 @@ async function generateAndStoreQuotationPdf(project, quotation){
     throw new Error("Storage rejected the PDF save (it may be too large).");
   }
   return pdfDataUrl;
+}
+
+// ---------------------------------------------------------------------
+// Design Studio: 3D renders + material selection, organized by room,
+// mirroring the Quotation Builder's room-based structure. Each uploaded
+// image is compressed client-side and stored under its own storage key
+// (like quotation PDFs) so the main project list stays small and fast to
+// sync/poll; only the image IDs are kept on the project record itself.
+// ---------------------------------------------------------------------
+function newRoomId(){ return "dsroom_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
+function newImageId(){ return "dsimg_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
+
+function ensureDesignStudio(p){
+  if(!p.designStudio) p.designStudio = { threeD: { rooms: [] }, material: { rooms: [] } };
+  if(!p.designStudio.threeD) p.designStudio.threeD = { rooms: [] };
+  if(!p.designStudio.material) p.designStudio.material = { rooms: [] };
+  return p.designStudio;
+}
+
+function designStudioTabData(p, tab){
+  const ds = ensureDesignStudio(p);
+  return tab === "material" ? ds.material : ds.threeD;
+}
+
+function compressImageFile(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 1400;
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = ()=>reject(new Error("Could not read that image file."));
+      img.src = reader.result;
+    };
+    reader.onerror = ()=>reject(new Error("Could not read that image file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function loadDesignStudioImages(p){
+  if(!p) return;
+  const ds = ensureDesignStudio(p);
+  const allIds = [...ds.threeD.rooms, ...ds.material.rooms].flatMap(r=>r.images);
+  const missing = [...new Set(allIds)].filter(id=>!state.designStudioImages[id]);
+  if(!missing.length) return;
+  const results = await Promise.all(missing.map(id=>window.storage.get("design-image:"+id, true).catch(()=>null)));
+  results.forEach((res,i)=>{ if(res && res.value) state.designStudioImages[missing[i]] = res.value; });
+}
+
+async function generateDesignStudioPdf(project, data, title){
+  if(!window.jspdf || !window.jspdf.jsPDF){
+    throw new Error("PDF library did not load (check your internet connection and try again).");
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  const INK = [8,40,69], BRASS = [169,129,79], PAPER = [246,243,236];
+  let y = 0;
+
+  // --- Header band (same banner used across all Studio documents) ---
+  const contactLines = [COMPANY_DETAILS.address, COMPANY_DETAILS.phone, COMPANY_DETAILS.email, COMPANY_DETAILS.gstin ? "GSTIN: " + COMPANY_DETAILS.gstin : ""].filter(Boolean);
+  const maxTextWidth = pageWidth - margin*2 - 60;
+  const wrappedContact = contactLines.map(line => doc.splitTextToSize(line, maxTextWidth));
+  const contactLineCount = wrappedContact.reduce((s,l)=>s+l.length, 0);
+  const headerHeight = 56 + contactLineCount * 11;
+
+  doc.setFillColor(PAPER[0],PAPER[1],PAPER[2]);
+  doc.rect(0, 0, pageWidth, headerHeight, "F");
+  doc.setDrawColor(BRASS[0],BRASS[1],BRASS[2]);
+  doc.setLineWidth(2);
+  doc.line(0, headerHeight, pageWidth, headerHeight);
+
+  y = 34;
+  const logo = getCompanyLogoDataUrl();
+  if(logo){
+    try{ doc.addImage(logo, "PNG", margin, y - 18, 38, 38); }catch(e){ console.warn("Logo could not be embedded:", e); }
+  }
+  const textX = margin + (logo ? 48 : 0);
+  doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(COMPANY_DETAILS.name, textX, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(BRASS[0],BRASS[1],BRASS[2]);
+  doc.text(COMPANY_DETAILS.tagline, textX, y + 14);
+  y += 32;
+
+  if(contactLines.length){
+    doc.setFontSize(9);
+    doc.setTextColor(90,90,90);
+    doc.setFont("helvetica","normal");
+    wrappedContact.forEach(wrapped=>{
+      doc.text(wrapped, margin, y);
+      y += wrapped.length * 11;
+    });
+  }
+  y = headerHeight + 26;
+
+  doc.setTextColor(20,20,20);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text(title, margin, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(90,90,90);
+  doc.text((project.projectName || "—") + "  ·  " + (formatClientName(project) || "—"), margin, y + 15);
+  y += 34;
+
+  const cols = 2, gap = 14;
+  const imgW = (pageWidth - margin*2 - gap*(cols-1)) / cols;
+  const imgH = imgW * 0.72;
+
+  const roomsWithImages = data.rooms.filter(r=>r.images && r.images.length);
+  if(!roomsWithImages.length){
+    doc.setFont("helvetica","italic");
+    doc.setFontSize(11);
+    doc.setTextColor(120,120,120);
+    doc.text("No images have been uploaded yet.", margin, y + 10);
+  }
+
+  roomsWithImages.forEach(room=>{
+    if(y + 36 > pageHeight - 50){ doc.addPage(); y = 50; }
+    doc.setFillColor(INK[0],INK[1],INK[2]);
+    doc.rect(margin, y, pageWidth - margin*2, 22, "F");
+    doc.setTextColor(255,255,255);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(10.5);
+    doc.text((room.name || "Room").toUpperCase(), margin + 10, y + 15);
+    y += 22 + 14;
+
+    let col = 0;
+    room.images.forEach(imgId=>{
+      const src = state.designStudioImages[imgId];
+      if(!src) return;
+      if(col === 0 && y + imgH > pageHeight - 50){ doc.addPage(); y = 50; }
+      const x = margin + col*(imgW+gap);
+      try{ doc.addImage(src, "JPEG", x, y, imgW, imgH, undefined, "FAST"); }
+      catch(e){ console.warn("Could not embed image", e); }
+      if(col === cols-1){ col = 0; y += imgH + gap; } else { col = 1; }
+    });
+    if(col !== 0) y += imgH + gap;
+    y += 10;
+  });
+
+  return doc.output("datauristring");
+}
+
+function renderDesignStudio(){
+  const p = state.projects.find(x=>x.id===state.designStudioProjectId);
+  if(!p) return `<div class="empty">Project not found.</div>`;
+  const tab = state.designStudioTab || "threeD";
+  const data = designStudioTabData(p, tab);
+  const tabLabel = tab === "material" ? "material selection" : "3D design";
+
+  const roomsHtml = data.rooms.map(room=>{
+    const imagesHtml = (room.images||[]).map(imgId=>{
+      const src = state.designStudioImages[imgId];
+      return `<div class="ds-thumb">
+        ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--slate);">Loading…</div>`}
+        <button type="button" class="ds-thumb-remove" data-room="${room.id}" data-img="${imgId}" title="Remove image">✕</button>
+      </div>`;
+    }).join("");
+    return `
+    <div class="card" style="cursor:default;">
+      <div class="card-top">
+        <input type="text" class="ds-room-name" data-room="${room.id}" value="${escapeAttr(room.name)}" placeholder="Room name" style="border:none;background:transparent;font-family:'Fraunces',serif;font-size:18px;padding:0;width:60%;">
+        <button type="button" class="icon-btn ds-delete-room" data-room="${room.id}">🗑 Delete Room</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px;">
+        ${imagesHtml}
+        <label class="ds-thumb-add" data-room="${room.id}">
+          + Add Image
+          <input type="file" accept="image/*" multiple class="ds-file-input" data-room="${room.id}" style="display:none;">
+        </label>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `
+  <div class="display" style="font-size:22px;margin-bottom:4px;">Design Studio</div>
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--slate);margin-bottom:18px;">${escapeHtml(p.projectName)} · ${escapeHtml(formatClientName(p))}</div>
+  <div style="display:flex;gap:8px;margin-bottom:18px;">
+    <button type="button" class="btn ${tab==='threeD' ? '' : 'ghost'} ds-tab-btn" data-tab="threeD">3D Design</button>
+    <button type="button" class="btn ${tab==='material' ? '' : 'ghost'} ds-tab-btn" data-tab="material">Material Selection</button>
+  </div>
+  <div class="toolbar">
+    <div style="flex:1;font-size:12.5px;color:var(--slate);align-self:center;">Upload ${escapeHtml(tabLabel)} images by room, then generate the PDF the client will download.</div>
+    <button type="button" class="btn ghost" id="dsAddRoomBtn">+ Add Room</button>
+    <button type="button" class="btn" id="dsGeneratePdfBtn">Generate &amp; Save PDF</button>
+  </div>
+  ${data.rooms.length ? `<div class="grid">${roomsHtml}</div>` : `
+  <div class="empty">
+    <div class="display">No rooms yet</div>
+    <div>Add a room, then upload ${escapeHtml(tabLabel)} images to it.</div>
+  </div>`}
+  `;
+}
+
+function attachDesignStudioHandlers(){
+  const p = state.projects.find(x=>x.id===state.designStudioProjectId);
+  if(!p) return;
+
+  document.querySelectorAll(".ds-tab-btn").forEach(b=>{
+    b.addEventListener("click", ()=>{ state.designStudioTab = b.dataset.tab; render(); });
+  });
+
+  const addRoomBtn = document.getElementById("dsAddRoomBtn");
+  if(addRoomBtn) addRoomBtn.onclick = async ()=>{
+    const data = designStudioTabData(p, state.designStudioTab);
+    data.rooms.push({ id: newRoomId(), name: "New Room", images: [] });
+    render();
+    await saveProjects();
+  };
+
+  document.querySelectorAll(".ds-room-name").forEach(inp=>{
+    inp.addEventListener("change", async ()=>{
+      const data = designStudioTabData(p, state.designStudioTab);
+      const room = data.rooms.find(r=>r.id===inp.dataset.room);
+      if(room) room.name = inp.value;
+      await saveProjects();
+    });
+  });
+
+  document.querySelectorAll(".ds-delete-room").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      const data = designStudioTabData(p, state.designStudioTab);
+      const room = data.rooms.find(r=>r.id===b.dataset.room);
+      if(!room) return;
+      if(!confirm(`Delete "${room.name || "this room"}" and all its images? This cannot be undone.`)) return;
+      const imageIds = room.images || [];
+      data.rooms = data.rooms.filter(r=>r.id!==b.dataset.room);
+      render();
+      await saveProjects();
+      await Promise.all(imageIds.map(id=>window.storage.delete("design-image:"+id, true).catch(()=>{})));
+    });
+  });
+
+  document.querySelectorAll(".ds-file-input").forEach(inp=>{
+    inp.addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      if(!files.length) return;
+      const data = designStudioTabData(p, state.designStudioTab);
+      const room = data.rooms.find(r=>r.id===inp.dataset.room);
+      if(!room) return;
+      showToast(`Uploading ${files.length} image${files.length>1?"s":""}…`);
+      for(const file of files){
+        try{
+          const dataUrl = await compressImageFile(file);
+          const imgId = newImageId();
+          const result = await window.storage.set("design-image:"+imgId, dataUrl, true);
+          if(!result){ showToast("Could not upload an image. Please try again.", true); continue; }
+          state.designStudioImages[imgId] = dataUrl;
+          room.images.push(imgId);
+        }catch(err){
+          console.error(err);
+          showToast("Could not upload an image. Please try again.", true);
+        }
+      }
+      render();
+      await saveProjects();
+    });
+  });
+
+  document.querySelectorAll(".ds-thumb-remove").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      const data = designStudioTabData(p, state.designStudioTab);
+      const room = data.rooms.find(r=>r.id===b.dataset.room);
+      if(!room) return;
+      room.images = room.images.filter(id=>id!==b.dataset.img);
+      render();
+      await saveProjects();
+      try{ await window.storage.delete("design-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
+    });
+  });
+
+  const genBtn = document.getElementById("dsGeneratePdfBtn");
+  if(genBtn) genBtn.onclick = async ()=>{
+    const data = designStudioTabData(p, state.designStudioTab);
+    if(!data.rooms.some(r=>r.images && r.images.length)){
+      showToast("Add at least one room with images before generating a PDF.", true);
+      return;
+    }
+    genBtn.disabled = true;
+    genBtn.textContent = "Generating…";
+    try{
+      await loadDesignStudioImages(p);
+      const title = state.designStudioTab === "material" ? "Material Selection" : "3D Design Renders";
+      const pdfDataUrl = await generateDesignStudioPdf(p, data, title);
+      const key = "design-pdf:" + state.designStudioTab + ":" + p.id;
+      const result = await window.storage.set(key, pdfDataUrl, true);
+      if(!result) throw new Error("Storage rejected the PDF (it may be too large — try fewer or smaller images).");
+      showToast("PDF saved! The client can now download it from their portal.");
+    }catch(err){
+      console.error(err);
+      showToast(err.message || "Could not generate PDF.", true);
+    }finally{
+      genBtn.disabled = false;
+      genBtn.textContent = "Generate & Save PDF";
+    }
+  };
 }
 
 async function saveQuotation(){
@@ -1827,7 +2143,7 @@ function render(){
   }
 
   const headerBack = document.getElementById("headerBack");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio"){
     headerBack.style.display = "inline-block";
   } else {
     headerBack.style.display = "none";
@@ -1857,6 +2173,12 @@ function render(){
     attachDesignersHandlers();
     if(state.editingDesigner !== null) renderDesignerModal();
     renderConfirmDeleteDesigner();
+    return;
+  }
+
+  if(state.screen === "designStudio"){
+    main.innerHTML = renderDesignStudio();
+    attachDesignStudioHandlers();
     return;
   }
 
@@ -1969,6 +2291,83 @@ function renderStudio(){
   }).join("");
 
   return tabs + toolbar + `<div class="grid">${cards}</div>`;
+}
+
+function siteMeasurementInnerHtml(p){
+  if(!p.siteVisitDate || !p.siteVisitTime){
+    return `<div style="color:var(--slate);">Client has not booked a site measurement slot yet.</div>`;
+  }
+  if(p.siteMeasurementCompleted){
+    return `<div style="color:#3a5c33;">✓ Site measurement completed${p.siteMeasurementCompletedAt ? " on " + escapeHtml(fmtDate((p.siteMeasurementCompletedAt||"").slice(0,10))) : ""}. Slot was ${escapeHtml(fmtDate(p.siteVisitDate))} at ${escapeHtml(p.siteVisitTime)}.</div>
+       <div style="margin-top:10px;"><button type="button" class="btn ghost" id="undoSiteMeasurementBtn" data-id="${p.id}" style="padding:7px 12px;font-size:11.5px;">Undo</button></div>`;
+  }
+  return `<div style="color:#8a6d1f;margin-bottom:10px;">📅 Slot booked: ${escapeHtml(fmtDate(p.siteVisitDate))} at ${escapeHtml(p.siteVisitTime)}. Client is waiting on confirmation that the visit is complete.</div>
+     <button type="button" class="btn" id="completeSiteMeasurementBtn" data-id="${p.id}">✓ Mark Site Measurements Completed</button>`;
+}
+
+function attachSiteMeasurementHandlers(){
+  const completeBtn = document.getElementById("completeSiteMeasurementBtn");
+  if(completeBtn){
+    completeBtn.onclick = async ()=>{
+      const project = state.projects.find(x=>x.id===completeBtn.dataset.id);
+      if(!project) return;
+      project.siteMeasurementCompleted = true;
+      project.siteMeasurementCompletedAt = new Date().toISOString();
+      completeBtn.disabled = true;
+      completeBtn.textContent = "Saving…";
+      await saveProjects();
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      render();
+    };
+  }
+  const undoBtn = document.getElementById("undoSiteMeasurementBtn");
+  if(undoBtn){
+    undoBtn.onclick = async ()=>{
+      const project = state.projects.find(x=>x.id===undoBtn.dataset.id);
+      if(!project) return;
+      project.siteMeasurementCompleted = false;
+      project.siteMeasurementCompletedAt = "";
+      undoBtn.disabled = true;
+      undoBtn.textContent = "Saving…";
+      await saveProjects();
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      render();
+    };
+  }
+}
+
+// Live-patch just the Site Measurement panel of an open project modal with
+// fresh data from storage, without touching the rest of the form.
+async function refreshSiteMeasurementIfEditing(){
+  if(state.editing === null || state.editing === "new") return;
+  const panel = document.getElementById("siteMeasurementPanel");
+  if(!panel || panel.dataset.projectId !== state.editing) return;
+  let freshList;
+  try{
+    const res = await window.storage.get(STORAGE_KEY, true);
+    freshList = res && res.value ? JSON.parse(res.value) : null;
+  }catch(e){ return; }
+  if(!freshList) return;
+  const freshProject = freshList.find(x=>x.id===state.editing);
+  const localProject = state.projects.find(x=>x.id===state.editing);
+  if(!freshProject || !localProject) return;
+  const fields = ["siteVisitDate","siteVisitTime","siteVisitBookedAt","siteMeasurementCompleted","siteMeasurementCompletedAt","materialSlotDate","materialSlotTime","materialSlotType","materialSelectionDownloadedAt"];
+  const changed = fields.some(k=>freshProject[k] !== localProject[k]);
+  if(!changed) return;
+  fields.forEach(k=>{ localProject[k] = freshProject[k]; });
+  panel.innerHTML = siteMeasurementInnerHtml(localProject);
+  attachSiteMeasurementHandlers();
+  const materialPanel = document.getElementById("materialSlotPanel");
+  if(materialPanel && materialPanel.dataset.projectId === state.editing){
+    materialPanel.innerHTML = materialSlotInnerHtml(localProject);
+  }
+}
+
+function materialSlotInnerHtml(p){
+  const meetingTypeLabel = p.materialSlotType === "vendor" ? "Visit Our Vendor" : "On-Site";
+  return `${p.materialSlotDate ? `📅 Material selection slot booked: ${escapeHtml(fmtDate(p.materialSlotDate))} at ${escapeHtml(p.materialSlotTime||"—")} · ${escapeHtml(meetingTypeLabel)}` : "No material selection slot booked yet."}${p.materialSelectionDownloadedAt ? ` · ✓ Client has downloaded the material selection sheet.` : ""}`;
 }
 
 function paymentVerificationInnerHtml(p){
@@ -2426,7 +2825,19 @@ function renderModal(){
           </div>`;
         })()}
         </div>
-        <div style="margin-top:10px;"><button type="button" class="btn ghost" id="manageDesignersFromModalBtn" style="padding:7px 12px;font-size:11.5px;">Manage Designer Profiles →</button></div>` : ""}
+        <div style="margin-top:10px;"><button type="button" class="btn ghost" id="manageDesignersFromModalBtn" style="padding:7px 12px;font-size:11.5px;">Manage Designer Profiles →</button></div>
+
+        <div class="section-label" style="margin-top:22px;">Site Measurement Visit</div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;" id="siteMeasurementPanel" data-project-id="${p.id}">
+            ${siteMeasurementInnerHtml(p)}
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:22px;">Design Studio</div>
+        <div style="font-size:12px;color:var(--slate);margin:-4px 0 8px;">Upload 3D renders and material selection images for the client to review and download.</div>
+        <div style="font-size:12.5px;color:var(--slate);margin-bottom:12px;" id="materialSlotPanel" data-project-id="${p.id}">${materialSlotInnerHtml(p)}</div>
+        <button type="button" class="btn ghost" id="openDesignStudioBtn" data-id="${p.id}">Open Design Studio →</button>` : ""}
 
         ${STAGES.indexOf(p.status) >= 1 ? `
         <div class="section-label">Payment Verification</div>
@@ -2519,6 +2930,21 @@ function renderModal(){
       await loadQuotation(projectId);
     };
   }
+  const openDesignStudioBtn = document.getElementById("openDesignStudioBtn");
+  if(openDesignStudioBtn){
+    openDesignStudioBtn.onclick = async ()=>{
+      const projectId = openDesignStudioBtn.dataset.id;
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      state.screen = "designStudio";
+      state.designStudioProjectId = projectId;
+      state.designStudioTab = "threeD";
+      render();
+      const p = state.projects.find(x=>x.id===projectId);
+      await loadDesignStudioImages(p);
+      render();
+    };
+  }
   const downloadAgreementBtn = document.getElementById("downloadAgreementBtn");
   if(downloadAgreementBtn){
     downloadAgreementBtn.onclick = ()=>{
@@ -2527,6 +2953,7 @@ function renderModal(){
     };
   }
   attachPaymentVerificationHandlers();
+  attachSiteMeasurementHandlers();
   const viewKycDocBtn = document.getElementById("viewKycDocBtn");
   if(viewKycDocBtn){
     viewKycDocBtn.onclick = async ()=>{
@@ -2594,6 +3021,9 @@ function renderModal(){
     errEl.style.display = "none";
     const newStatus = fd.get("status");
     const movedBackToDiscussion = newStatus === "In Discussion" && p.status !== "In Discussion";
+    const designDevIdx = STAGES.indexOf("Design Development");
+    const movedOutOfDesignPhase = STAGES.indexOf(p.status) >= designDevIdx && STAGES.indexOf(newStatus) < designDevIdx;
+    const resetDesignWizard = movedBackToDiscussion || movedOutOfDesignPhase;
     const updated = {
       id: p.id,
       clientName: clientName, clientSalutation: fd.get("clientSalutation"), clientEmail: fd.get("clientEmail"), clientPhone: fd.get("clientPhone"),
@@ -2615,8 +3045,8 @@ function renderModal(){
       designerPhone: p.designerPhone,
       designerBio: p.designerBio,
       assignedDesignerId: fd.has("assignedDesignerId") ? fd.get("assignedDesignerId") : (p.assignedDesignerId || ""),
-      designWelcomeSeen: movedBackToDiscussion ? false : (p.designWelcomeSeen || false),
-      designerIntroSeen: movedBackToDiscussion ? false : (p.designerIntroSeen || false),
+      designWelcomeSeen: resetDesignWizard ? false : (p.designWelcomeSeen || false),
+      designerIntroSeen: resetDesignWizard ? false : (p.designerIntroSeen || false),
       agreementAccepted: movedBackToDiscussion ? false : p.agreementAccepted,
       agreementAcceptedAt: movedBackToDiscussion ? "" : p.agreementAcceptedAt,
       quotationAccepted: movedBackToDiscussion ? false : p.quotationAccepted,
@@ -2732,6 +3162,12 @@ function escapeHtml(str){
 function escapeAttr(str){ return escapeHtml(str); }
 
 document.getElementById("headerBack").addEventListener("click", ()=>{
+  if(state.screen === "designStudio"){
+    state.screen = "main";
+    state.designStudioProjectId = null;
+    render();
+    return;
+  }
   if(state.screen === "designers"){
     state.screen = "main";
     state.editingDesigner = null;
@@ -2774,6 +3210,7 @@ async function refreshProjectsIfSafe(){
     // UTR/screenshot shows up — and becomes verifiable — right away
     // instead of only after closing and reopening the project.
     await refreshPaymentVerificationIfEditing();
+    await refreshSiteMeasurementIfEditing();
     return;
   }
   const scrollY = window.scrollY;
