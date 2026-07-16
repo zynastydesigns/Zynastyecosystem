@@ -1648,6 +1648,14 @@ function isRefreshUnsafe(){
     return formShowing;
   }
   if(step === "kyc") return !p.kycCompleted;
+  // Design phase: don't refresh out from under the client mid-way through
+  // filling the site measurement or material selection booking form —
+  // a refresh rebuilds the form from saved state and wipes anything
+  // they've picked but not yet submitted (e.g. opening a native date
+  // picker can itself trigger a focus/visibility event).
+  const progressStep = p.progressStep || "siteVisit";
+  if(progressStep === "siteVisit" && !(p.siteVisitDate && p.siteVisitTime)) return true;
+  if(progressStep === "material" && !(p.materialSlotDate && p.materialSlotTime)) return true;
   return false;
 }
 
