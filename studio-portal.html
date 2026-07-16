@@ -286,6 +286,34 @@
   .access-gate-card .btn:hover{background:var(--ink-2);}
   .access-gate-note{font-size:12px;color:var(--slate);margin-top:16px;}
 </style>
+
+<style>
+.project-ledger,
+.designer-profile,
+.project-ledger .card,
+.designer-profile .card,
+.project-ledger .panel,
+.designer-profile .panel {
+  background:
+    linear-gradient(rgba(18, 41, 63, 0.35), rgba(18, 41, 63, 0.35)),
+    url("./1000026391.jpg") center center / cover repeat !important;
+  background-blend-mode: multiply;
+}
+.project-ledger *,
+.designer-profile * {
+  color: #f7f3eb !important;
+}
+.project-ledger input,
+.project-ledger select,
+.project-ledger textarea,
+.designer-profile input,
+.designer-profile select,
+.designer-profile textarea {
+  background: rgba(255,255,255,0.94) !important;
+  color: #1d2d3c !important;
+}
+</style>
+
 </head>
 <body>
 
@@ -3359,5 +3387,3 @@ async function refreshProjectsIfSafe(){
 </script>
 </body>
 </html>
-
-<!-- added image: 1000026391.jpg -->
