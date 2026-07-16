@@ -2358,11 +2358,48 @@ function siteMeasurementInnerHtml(p){
     return `<div style="color:#3a5c33;">✓ Site measurement completed${p.siteMeasurementCompletedAt ? " on " + escapeHtml(fmtDate((p.siteMeasurementCompletedAt||"").slice(0,10))) : ""}. Slot was ${escapeHtml(fmtDate(p.siteVisitDate))} at ${escapeHtml(p.siteVisitTime)}.</div>
        <div style="margin-top:10px;"><button type="button" class="btn ghost" id="undoSiteMeasurementBtn" data-id="${p.id}" style="padding:7px 12px;font-size:11.5px;">Undo</button></div>`;
   }
-  return `<div style="color:#8a6d1f;margin-bottom:10px;">📅 Slot booked: ${escapeHtml(fmtDate(p.siteVisitDate))} at ${escapeHtml(p.siteVisitTime)}. Client is waiting on confirmation that the visit is complete.</div>
-     <button type="button" class="btn" id="completeSiteMeasurementBtn" data-id="${p.id}">✓ Mark Site Measurements Completed</button>`;
+  if(p.siteVisitConfirmed){
+    return `<div style="color:#8a6d1f;margin-bottom:10px;">✓ Slot confirmed for ${escapeHtml(fmtDate(p.siteVisitDate))} at ${escapeHtml(p.siteVisitTime)}. Once the designer has visited the site and completed the measurements, mark it done below.</div>
+       <div style="display:flex;gap:10px;flex-wrap:wrap;">
+         <button type="button" class="btn" id="completeSiteMeasurementBtn" data-id="${p.id}">✓ Mark Site Measurements Completed</button>
+         <button type="button" class="btn ghost" id="unconfirmSiteVisitBtn" data-id="${p.id}" style="padding:7px 12px;font-size:11.5px;">Undo Confirmation</button>
+       </div>`;
+  }
+  return `<div style="color:var(--slate);margin-bottom:10px;">📅 Slot requested: ${escapeHtml(fmtDate(p.siteVisitDate))} at ${escapeHtml(p.siteVisitTime)}. Confirm this slot with the client.</div>
+     <button type="button" class="btn" id="confirmSiteVisitBtn" data-id="${p.id}">✓ Confirm Slot</button>`;
 }
 
 function attachSiteMeasurementHandlers(){
+  const confirmBtn = document.getElementById("confirmSiteVisitBtn");
+  if(confirmBtn){
+    confirmBtn.onclick = async ()=>{
+      const project = state.projects.find(x=>x.id===confirmBtn.dataset.id);
+      if(!project) return;
+      project.siteVisitConfirmed = true;
+      project.siteVisitConfirmedAt = new Date().toISOString();
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Saving…";
+      await saveProjects();
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      render();
+    };
+  }
+  const unconfirmBtn = document.getElementById("unconfirmSiteVisitBtn");
+  if(unconfirmBtn){
+    unconfirmBtn.onclick = async ()=>{
+      const project = state.projects.find(x=>x.id===unconfirmBtn.dataset.id);
+      if(!project) return;
+      project.siteVisitConfirmed = false;
+      project.siteVisitConfirmedAt = "";
+      unconfirmBtn.disabled = true;
+      unconfirmBtn.textContent = "Saving…";
+      await saveProjects();
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      render();
+    };
+  }
   const completeBtn = document.getElementById("completeSiteMeasurementBtn");
   if(completeBtn){
     completeBtn.onclick = async ()=>{
@@ -2410,7 +2447,7 @@ async function refreshSiteMeasurementIfEditing(){
   const freshProject = freshList.find(x=>x.id===state.editing);
   const localProject = state.projects.find(x=>x.id===state.editing);
   if(!freshProject || !localProject) return;
-  const fields = ["siteVisitDate","siteVisitTime","siteVisitBookedAt","siteMeasurementCompleted","siteMeasurementCompletedAt","materialSlotDate","materialSlotTime","materialSlotType","materialSelectionDownloadedAt"];
+  const fields = ["siteVisitDate","siteVisitTime","siteVisitBookedAt","siteVisitConfirmed","siteVisitConfirmedAt","siteMeasurementCompleted","siteMeasurementCompletedAt","materialSlotDate","materialSlotTime","materialSlotType","materialSelectionDownloadedAt"];
   const changed = fields.some(k=>freshProject[k] !== localProject[k]);
   if(!changed) return;
   fields.forEach(k=>{ localProject[k] = freshProject[k]; });

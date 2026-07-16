@@ -943,6 +943,7 @@ function renderClient(){
     const fieldStyle = "width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;";
 
     const siteMeasurementCompleted = !!p.siteMeasurementCompleted;
+    const siteVisitConfirmed = !!p.siteVisitConfirmed;
     const materialDownloaded = !!p.materialSelectionDownloadedAt;
 
     const stepPillsHtml = `
@@ -962,7 +963,9 @@ function renderClient(){
         <div style="max-width:360px;margin:0 auto;text-align:center;padding:16px;background:${siteMeasurementCompleted ? "#eef4ec" : "#fbf5e6"};border:1px solid ${siteMeasurementCompleted ? "#b9d3b1" : "#e6d290"};border-radius:8px;font-size:14px;color:${siteMeasurementCompleted ? "#3a5c33" : "#8a6d1f"};">
           ${siteMeasurementCompleted
             ? `✓ Site measurements completed.`
-            : `✓ Your slot is confirmed for ${fmtDate(p.siteVisitDate)} at ${escapeHtml(p.siteVisitTime)}. Our designer will visit the site to complete the measurements — we'll update you here once that's done.`}
+            : siteVisitConfirmed
+            ? `✓ Your slot is confirmed for ${fmtDate(p.siteVisitDate)} at ${escapeHtml(p.siteVisitTime)}. Our designer will visit the site to complete the measurements — we'll update you here once that's done.`
+            : `Your slot request for ${fmtDate(p.siteVisitDate)} at ${escapeHtml(p.siteVisitTime)} has been received. We'll confirm it here shortly.`}
         </div>
         <div style="text-align:center;margin-top:14px;"><button type="button" class="btn ghost" id="changeSiteVisitBtn" style="padding:7px 14px;font-size:12px;">Change Slot</button></div>
         ${siteMeasurementCompleted ? `<div style="text-align:center;margin-top:20px;"><button class="btn" id="siteVisitNextBtn">Next →</button></div>` : ""}` : `
@@ -1489,6 +1492,7 @@ function attachClientHandlers(){
     changeSiteVisitBtn.onclick = async ()=>{
       const p = state.clientResult;
       p.siteVisitDate = ""; p.siteVisitTime = ""; p.siteVisitBookedAt = "";
+      p.siteVisitConfirmed = false; p.siteVisitConfirmedAt = "";
       p.siteMeasurementCompleted = false; p.siteMeasurementCompletedAt = "";
       render();
       await saveClientProject(p);
