@@ -1335,6 +1335,13 @@
   const SB_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY };
   const PROJECTS_KEY = "projects";
 
+  // Matches Studio Portal's own genCode("PRJ") convention for the client
+  // portal access code, so leads converted here look the same as projects
+  // added directly in Studio Portal.
+  function genAccessCode(){
+    return "PRJ-" + Math.floor(100 + Math.random() * 900);
+  }
+
   // Where the Studio Portal app lives, relative to this file — update this
   // constant if the two apps are ever deployed to different paths/domains.
   const STUDIO_PORTAL_URL = "studio-portal.html";
@@ -1485,6 +1492,7 @@
         projectType: lead.projectType || "",
         propertyAddress: lead.propertyAddress || "",
         status: "In Discussion",
+        accessCode: genAccessCode(),
         contractValue: lead.budget || "",
         targetCompletion: lead.timeline || "",
         details: lead.notes || "",

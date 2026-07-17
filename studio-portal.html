@@ -662,28 +662,35 @@ async function loadProjects(){
   render();
 }
 
-async function saveProjects(){
+async function saveProjects(protectedId, excludeIds){
   try{
     // Before overwriting the whole shared "projects" blob, pull the latest
-    // copy and merge it in for every project OTHER than the one currently
-    // open for editing. Without this, this browser's in-memory snapshot
-    // (which can be minutes old) would blindly stomp the entire list —
-    // silently erasing any payment submission, phase move, or other
-    // client-made update that landed on ANY project in the meantime. The
-    // project actively being edited is left as-is so studio's own in-flight
-    // edits here still win.
+    // copy and merge it in for every project OTHER than the one actually
+    // being saved right now. Without this, this browser's in-memory
+    // snapshot (which can be minutes old) would blindly stomp the entire
+    // list — silently erasing any payment submission, phase move, or other
+    // client-made update that landed on ANY project in the meantime.
+    // protectedId defaults to state.editing, but callers that already
+    // cleared state.editing before saving (e.g. to close the sheet
+    // immediately) must pass the id explicitly, or this merge will filter
+    // out a brand-new project entirely (it doesn't exist in freshList yet)
+    // and overwrite in-flight edits to an existing one.
+    // excludeIds lists projects intentionally deleted in this save, so the
+    // merge doesn't resurrect them from the (not-yet-updated) remote copy.
+    if(protectedId === undefined) protectedId = state.editing;
+    const excluded = excludeIds || [];
     try{
       const res = await window.storage.get(STORAGE_KEY, true);
       const freshList = res && res.value ? JSON.parse(res.value) : null;
       if(freshList){
         freshList.forEach(freshProject=>{
-          if(freshProject.id === state.editing) return;
+          if(freshProject.id === protectedId || excluded.includes(freshProject.id)) return;
           const idx = state.projects.findIndex(x=>x.id===freshProject.id);
           if(idx === -1) state.projects.push(freshProject);
           else state.projects[idx] = freshProject;
         });
         state.projects = state.projects.filter(p=>
-          p.id === state.editing || freshList.some(f=>f.id===p.id)
+          p.id === protectedId || freshList.some(f=>f.id===p.id)
         );
       }
     }catch(e){ /* if the pre-save refresh fails, fall back to saving local state as-is */ }
@@ -1370,7 +1377,7 @@ function attachDesignStudioHandlers(){
       const data = designStudioTabData(p, state.designStudioTab);
       const room = data.rooms.find(r=>r.id===inp.dataset.room);
       if(room) room.name = inp.value;
-      await saveProjects();
+      await saveProjects(p.id);
     });
   });
 
@@ -1383,7 +1390,7 @@ function attachDesignStudioHandlers(){
       const imageIds = room.images || [];
       data.rooms = data.rooms.filter(r=>r.id!==b.dataset.room);
       render();
-      await saveProjects();
+      await saveProjects(p.id);
       await Promise.all(imageIds.map(id=>window.storage.delete("design-image:"+id, true).catch(()=>{})));
     });
   });
@@ -1410,7 +1417,7 @@ function attachDesignStudioHandlers(){
         }
       }
       render();
-      await saveProjects();
+      await saveProjects(p.id);
     });
   });
 
@@ -1421,7 +1428,7 @@ function attachDesignStudioHandlers(){
       if(!room) return;
       room.images = room.images.filter(id=>id!==b.dataset.img);
       render();
-      await saveProjects();
+      await saveProjects(p.id);
       try{ await window.storage.delete("design-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
     });
   });
@@ -1923,7 +1930,7 @@ function attachQuotationHandlers(){
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(project){
         project.quotationSavedAt = new Date().toISOString();
-        await saveProjects();
+        await saveProjects(project.id);
       }
       try{
         if(project){
@@ -1948,7 +1955,7 @@ function attachQuotationHandlers(){
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
       project.initialQuotation = Math.round(t.grandTotal);
-      await saveProjects();
+      await saveProjects(project.id);
       await saveQuotation();
       showToast("Initial Quotation updated to " + fmtMoney(project.initialQuotation) + ".", false);
       render();
@@ -2006,7 +2013,7 @@ function renderDsRoomPicker(){
     data.rooms.push({ id: newRoomId(), name: trimmed, images: [] });
     state.showDsRoomPicker = false;
     render();
-    await saveProjects();
+    await saveProjects(p.id);
   };
 
   document.querySelectorAll(".room-type-btn").forEach(btn=>{
@@ -3000,35 +3007,6 @@ function renderModal(){
           <div class="field full"><label>Welcome Message</label><textarea name="welcomeMessage" placeholder="A warm note introducing the project and next steps…">${escapeHtml(p.welcomeMessage)}</textarea></div>
         </div>
 
-        ${p.status === "Lost" ? `
-        <div class="section-label">Lost / Rejected — Recovery</div>
-        <div class="field-row">
-          <div class="field full" style="font-size:13px;color:var(--slate);">
-            Marked lost on ${escapeHtml(fmtDate((p.lostAt||"").slice(0,10)))}. Use the procedures below to leave the door open — the client can reconsider anytime from their portal, or submit a referral.
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field full"><label>Internal Notes (reason — not shown to client)</label><textarea name="lostReason" placeholder="e.g. Budget mismatch, went with another studio…">${escapeHtml(p.lostReason)}</textarea></div>
-        </div>
-        <div class="field-row">
-          <div class="field full" style="display:flex;gap:10px;flex-wrap:wrap;">
-            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostEmailHref(p)}" target="_blank" rel="noopener">✉️ Email Procedure</a>
-            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostWhatsAppHref(p)}" target="_blank" rel="noopener">💬 WhatsApp Procedure</a>
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field full" style="font-size:13px;">
-            <label style="display:block;margin-bottom:6px;">Referrals Received (${(p.referrals||[]).length})</label>
-            ${(p.referrals||[]).length
-              ? (p.referrals||[]).map(r=>`<div style="padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;">
-                   <div><strong>${escapeHtml(r.name||"—")}</strong> · ${escapeHtml(r.contact||"—")}</div>
-                   ${r.notes ? `<div style="color:var(--slate);margin-top:2px;">${escapeHtml(r.notes)}</div>` : ""}
-                   <div style="color:var(--slate);font-size:11.5px;margin-top:2px;">Submitted ${escapeHtml(fmtDate((r.submittedAt||"").slice(0,10)))}</div>
-                 </div>`).join("")
-              : `<div style="color:var(--slate);">No referrals submitted yet.</div>`}
-          </div>
-        </div>` : ""}
-
         ${STAGES.indexOf(p.status) >= 1 ? `
         <div class="section-label">Design Agreement</div>
         <div class="field-row">
@@ -3049,38 +3027,6 @@ function renderModal(){
         </div>` : ""}
 
         ${STAGES.indexOf(p.status) >= STAGES.indexOf("Design Development") ? `
-        <div class="section-label">Assigned Designer</div>
-        <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Shown to the client in their portal as a profile card once they view the Design & Development stage.</div>
-        <div class="field-row">
-          <div class="field full">
-            <label>Assign Designer</label>
-            <select name="assignedDesignerId" id="assignedDesignerSelect">
-              <option value="">— Select Designer —</option>
-              ${(state.designers||[]).filter(d=>d.status!=="inactive" || d.id===p.assignedDesignerId).map(d=>`<option value="${d.id}" ${p.assignedDesignerId===d.id?"selected":""}>${escapeHtml(d.name)}${d.status==="inactive"?" (Inactive)":""}</option>`).join("")}
-            </select>
-          </div>
-        </div>
-        <div id="assignedDesignerPreview">
-        ${(()=>{
-          const assigned = (state.designers||[]).find(d=>d.id===p.assignedDesignerId);
-          if(!assigned){
-            return !((state.designers||[]).length) ? `<div style="font-size:12.5px;color:var(--slate);margin-top:4px;">No designer profiles yet — create one to assign.</div>` : "";
-          }
-          const contactLine = [assigned.role, assigned.email, assigned.phone].filter(Boolean).join(" · ");
-          return `
-          <div style="display:flex;gap:14px;align-items:center;margin-top:6px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px;">
-            <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:18px;">
-              ${assigned.photo ? `<img src="${escapeAttr(assigned.photo)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((assigned.name||"?").trim().charAt(0).toUpperCase())}
-            </div>
-            <div style="font-size:13px;">
-              <div style="font-weight:600;">${escapeHtml(assigned.name)}</div>
-              ${contactLine ? `<div style="color:var(--slate);">${escapeHtml(contactLine)}</div>` : ""}
-            </div>
-          </div>`;
-        })()}
-        </div>
-        <div style="margin-top:10px;"><button type="button" class="btn ghost" id="manageDesignersFromModalBtn" style="padding:7px 12px;font-size:11.5px;">Manage Designer Profiles →</button></div>
-
         <div class="section-label" style="margin-top:22px;">Site Measurement Visit</div>
         <div class="field-row">
           <div class="field full" style="font-size:13px;" id="siteMeasurementPanel" data-project-id="${p.id}">
@@ -3132,6 +3078,35 @@ function renderModal(){
           <div class="field full"><label>Production Agreement Notes</label><textarea name="contractNotes" placeholder="Terms, deposit, payment schedule…">${escapeHtml(p.contractNotes)}</textarea></div>
         </div>` : ""}
 
+        ${p.status === "Lost" ? `
+        <div class="section-label">Lost / Rejected — Recovery</div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;color:var(--slate);">
+            Marked lost on ${escapeHtml(fmtDate((p.lostAt||"").slice(0,10)))}. Use the procedures below to leave the door open — the client can reconsider anytime from their portal, or submit a referral.
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field full"><label>Internal Notes (reason — not shown to client)</label><textarea name="lostReason" placeholder="e.g. Budget mismatch, went with another studio…">${escapeHtml(p.lostReason)}</textarea></div>
+        </div>
+        <div class="field-row">
+          <div class="field full" style="display:flex;gap:10px;flex-wrap:wrap;">
+            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostEmailHref(p)}" target="_blank" rel="noopener">✉️ Email Procedure</a>
+            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostWhatsAppHref(p)}" target="_blank" rel="noopener">💬 WhatsApp Procedure</a>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;">
+            <label style="display:block;margin-bottom:6px;">Referrals Received (${(p.referrals||[]).length})</label>
+            ${(p.referrals||[]).length
+              ? (p.referrals||[]).map(r=>`<div style="padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;">
+                   <div><strong>${escapeHtml(r.name||"—")}</strong> · ${escapeHtml(r.contact||"—")}</div>
+                   ${r.notes ? `<div style="color:var(--slate);margin-top:2px;">${escapeHtml(r.notes)}</div>` : ""}
+                   <div style="color:var(--slate);font-size:11.5px;margin-top:2px;">Submitted ${escapeHtml(fmtDate((r.submittedAt||"").slice(0,10)))}</div>
+                 </div>`).join("")
+              : `<div style="color:var(--slate);">No referrals submitted yet.</div>`}
+          </div>
+        </div>` : ""}
+
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="cancelBtn">Cancel</button>
           <button type="submit" class="btn">${isNew ? "Add Project" : "Save Changes"}</button>
@@ -3143,35 +3118,6 @@ function renderModal(){
 
   document.getElementById("cancelBtn").onclick = ()=>{ closeEditSheetUI(); };
   document.getElementById("overlay").addEventListener("click",(e)=>{ if(e.target.id==="overlay"){ closeEditSheetUI(); }});
-  const assignedDesignerSelect = document.getElementById("assignedDesignerSelect");
-  if(assignedDesignerSelect){
-    assignedDesignerSelect.onchange = (e)=>{
-      const preview = document.getElementById("assignedDesignerPreview");
-      const assigned = (state.designers||[]).find(d=>d.id===e.target.value);
-      if(!assigned){ preview.innerHTML = ""; return; }
-      const contactLine = [assigned.role, assigned.email, assigned.phone].filter(Boolean).join(" · ");
-      preview.innerHTML = `
-        <div style="display:flex;gap:14px;align-items:center;margin-top:6px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px;">
-          <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:18px;">
-            ${assigned.photo ? `<img src="${escapeAttr(assigned.photo)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((assigned.name||"?").trim().charAt(0).toUpperCase())}
-          </div>
-          <div style="font-size:13px;">
-            <div style="font-weight:600;">${escapeHtml(assigned.name)}</div>
-            ${contactLine ? `<div style="color:var(--slate);">${escapeHtml(contactLine)}</div>` : ""}
-          </div>
-        </div>`;
-    };
-  }
-  const manageDesignersFromModalBtn = document.getElementById("manageDesignersFromModalBtn");
-  if(manageDesignersFromModalBtn){
-    manageDesignersFromModalBtn.onclick = ()=>{
-      state.editing = null;
-      document.getElementById("overlay").remove();
-      popEditHistoryIfNeeded();
-      state.screen = "designers";
-      render();
-    };
-  }
   const openQuoteBtn = document.getElementById("openQuoteBtn");
   if(openQuoteBtn){
     openQuoteBtn.onclick = async ()=>{
@@ -3334,12 +3280,13 @@ function renderModal(){
       const i = state.projects.findIndex(x=>x.id===p.id);
       state.projects[i] = updated;
     }
+    const savedProjectId = updated.id;
     state.editing = null;
     document.getElementById("overlay").remove();
     popEditHistoryIfNeeded();
     render();
     try{
-      await saveProjects();
+      await saveProjects(savedProjectId);
     }catch(err){
       console.error(err);
       showToast("Could not save changes. Please try again.", true);
@@ -3412,7 +3359,7 @@ function renderConfirm(){
     state.confirmDelete = null;
     document.getElementById("confirmOverlay").remove();
     render();
-    try{ await saveProjects(); }catch(err){ console.error(err); showToast("Could not save changes. Please try again.", true); }
+    try{ await saveProjects(undefined, [id]); }catch(err){ console.error(err); showToast("Could not save changes. Please try again.", true); }
   };
 }
 
