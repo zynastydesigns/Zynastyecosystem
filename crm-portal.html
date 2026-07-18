@@ -981,6 +981,11 @@
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
   }
 
+  function isValidPhone(v){
+    const digits = (v||"").replace(/[^\d]/g,"");
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
   // Password visibility toggles (login, signup, and change-password fields)
   document.querySelectorAll('.pw-toggle').forEach(function(btn){
     btn.addEventListener('click', function(){
@@ -1138,6 +1143,22 @@
   profileSaveBtn.addEventListener('click', async function(){
     const session = await loadSession();
     if(!session || !session.access_token){ showLogin(); return; }
+    const phone = profilePhoneInput.value.trim();
+    const experienceRaw = profileExperienceInput.value.trim();
+    [profilePhoneInput, profileExperienceInput].forEach(el => el.style.borderColor = '');
+    profileMsg.style.color = '';
+    if(phone && !isValidPhone(phone)){
+      profileMsg.textContent = 'Please enter a valid phone number.';
+      profilePhoneInput.style.borderColor = 'var(--clay)';
+      profilePhoneInput.focus();
+      return;
+    }
+    if(experienceRaw && (isNaN(Number(experienceRaw)) || Number(experienceRaw) < 0)){
+      profileMsg.textContent = "Experience can't be negative.";
+      profileExperienceInput.style.borderColor = 'var(--clay)';
+      profileExperienceInput.focus();
+      return;
+    }
     profileMsg.textContent = '';
     profileSaveBtn.disabled = true;
     profileSaveBtn.textContent = 'Saving…';
@@ -1146,8 +1167,8 @@
         data: {
           full_name: profileNameInput.value.trim(),
           role: profileRoleInput.value.trim(),
-          phone: profilePhoneInput.value.trim(),
-          experience_years: profileExperienceInput.value ? Number(profileExperienceInput.value) : null,
+          phone,
+          experience_years: experienceRaw ? Number(experienceRaw) : null,
           access_role: profileAccessRoleSelect.value,
           notify_logins: profileNotifyLoginsCheckbox.checked
         }
@@ -1526,6 +1547,12 @@
         lead.projectKey = projectId;
         return;
       }
+      let accessCode = genAccessCode();
+      let attempts = 0;
+      while(projects.some(p=>p.accessCode===accessCode) && attempts < 50){
+        accessCode = genAccessCode();
+        attempts++;
+      }
       projects.push({
         id: projectId,
         clientSalutation: lead.salutation || "",
@@ -1536,7 +1563,7 @@
         projectType: lead.projectType || "",
         propertyAddress: lead.propertyAddress || "",
         status: "In Discussion",
-        accessCode: genAccessCode(),
+        accessCode: accessCode,
         contractValue: lead.budget || "",
         targetCompletion: lead.timeline || "",
         details: lead.notes || "",
@@ -1784,13 +1811,32 @@
   newLeadToggle.addEventListener('click', function(){
     newLeadFormPanel.style.display = newLeadFormPanel.style.display === 'none' ? '' : 'none';
     leadFormMsg.textContent = '';
+    leadFormMsg.style.color = '';
+    [leadNameInput, leadEmailInput, leadPhoneInput, leadBudgetInput].forEach(el => el.style.borderColor = '');
   });
 
   leadSaveBtn.addEventListener('click', async function(){
     const name = leadNameInput.value.trim();
-    if(!name){
-      leadFormMsg.textContent = 'Client name is required.';
-      return;
+    const email = leadEmailInput.value.trim();
+    const phone = leadPhoneInput.value.trim();
+    const budgetRaw = leadBudgetInput.value.trim();
+    [leadNameInput, leadEmailInput, leadPhoneInput, leadBudgetInput].forEach(el => el.style.borderColor = '');
+    leadFormMsg.style.color = '';
+    const showInvalid = (el, msg)=>{
+      leadFormMsg.textContent = msg;
+      el.style.borderColor = 'var(--clay)';
+      el.focus();
+    };
+    if(!name){ showInvalid(leadNameInput, 'Client name is required.'); return; }
+    if(email && !isValidEmail(email)){ showInvalid(leadEmailInput, 'Please enter a valid email address.'); return; }
+    if(phone && !isValidPhone(phone)){ showInvalid(leadPhoneInput, 'Please enter a valid phone number.'); return; }
+    if(budgetRaw && (isNaN(Number(budgetRaw)) || Number(budgetRaw) < 0)){ showInvalid(leadBudgetInput, "Budget can't be negative."); return; }
+    if(email || phone){
+      const dupe = currentLeads.find(l =>
+        (email && (l.email||'').trim().toLowerCase() === email.toLowerCase()) ||
+        (phone && (l.phone||'').replace(/[^\d]/g,'') === phone.replace(/[^\d]/g,''))
+      );
+      if(dupe && !confirm(`A lead for ${dupe.name} already has this email/phone. Add another lead anyway?`)) return;
     }
     leadFormMsg.textContent = '';
     leadSaveBtn.disabled = true;
@@ -1800,12 +1846,12 @@
         id: 'lead_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
         salutation: leadSalutationInput.value,
         name,
-        email: leadEmailInput.value.trim(),
-        phone: leadPhoneInput.value.trim(),
+        email,
+        phone,
         projectName: leadProjectNameInput.value.trim(),
         projectType: leadProjectTypeInput.value,
         propertyAddress: leadPropertyAddressInput.value.trim(),
-        budget: leadBudgetInput.value ? Number(leadBudgetInput.value) : null,
+        budget: budgetRaw ? Number(budgetRaw) : null,
         timeline: leadProjectStartInput.value.trim(),
         notes: leadNotesInput.value.trim(),
         stage: 'Fresh',
@@ -1817,11 +1863,14 @@
       await saveLeads(currentLeads);
       renderLeadsBoard(currentLeads);
       refreshDashboardData();
-      newLeadFormPanel.style.display = 'none';
       [leadSalutationInput, leadNameInput, leadEmailInput, leadPhoneInput, leadProjectNameInput, leadProjectTypeInput, leadPropertyAddressInput, leadBudgetInput, leadProjectStartInput, leadNotesInput]
         .forEach(el => el.value = '');
+      leadFormMsg.style.color = 'var(--teal)';
+      leadFormMsg.textContent = 'Lead added.';
+      setTimeout(()=>{ newLeadFormPanel.style.display = 'none'; leadFormMsg.textContent = ''; leadFormMsg.style.color = ''; }, 900);
     }catch(err){
       console.error('Could not save lead', err);
+      leadFormMsg.style.color = '';
       leadFormMsg.textContent = "Couldn't save this lead. Try again.";
     }finally{
       leadSaveBtn.disabled = false;

@@ -780,30 +780,38 @@ async function loadProjects(){
 
 async function saveProjects(excludeIds){
   const excluded = new Set(excludeIds || []);
+  // Besides the project open in the edit sheet (state.editing), a project
+  // can also be actively worked on from the Design Studio or Quotation
+  // screens without the edit sheet being open at all — those changes need
+  // the same protection from the merge below, or they'd be silently
+  // overwritten by a stale fetch (this was the root cause of Design Studio
+  // uploads/edits not sticking).
+  const protectedIds = new Set([state.editing, state.designStudioProjectId, state.quotationProjectId].filter(Boolean));
   try{
     // Before overwriting the whole shared "projects" blob, pull the latest
-    // copy and merge it in for every project OTHER than the one currently
+    // copy and merge it in for every project OTHER than the one(s) currently
     // open for editing. Without this, this browser's in-memory snapshot
     // (which can be minutes old) would blindly stomp the entire list —
     // silently erasing any payment submission, phase move, or other
     // client-made update that landed on ANY project in the meantime. The
-    // project actively being edited is left as-is so studio's own in-flight
-    // edits here still win. Projects passed in excludeIds (e.g. one just
-    // deleted by this same call) are never re-added from the fresh copy —
-    // otherwise a delete could be silently undone by this same merge.
+    // project(s) actively being edited are left as-is so studio's own
+    // in-flight edits here still win. Projects passed in excludeIds (e.g.
+    // one just deleted by this same call) are never re-added from the
+    // fresh copy — otherwise a delete could be silently undone by this
+    // same merge.
     try{
       const res = await window.storage.get(STORAGE_KEY, true);
       const freshList = res && res.value ? JSON.parse(res.value) : null;
       if(freshList){
         freshList.forEach(freshProject=>{
-          if(freshProject.id === state.editing) return;
+          if(protectedIds.has(freshProject.id)) return;
           if(excluded.has(freshProject.id)) return;
           const idx = state.projects.findIndex(x=>x.id===freshProject.id);
           if(idx === -1) state.projects.push(freshProject);
           else state.projects[idx] = freshProject;
         });
         state.projects = state.projects.filter(p=>
-          !excluded.has(p.id) && (p.id === state.editing || freshList.some(f=>f.id===p.id))
+          !excluded.has(p.id) && (protectedIds.has(p.id) || freshList.some(f=>f.id===p.id))
         );
       }
     }catch(e){ /* if the pre-save refresh fails, fall back to saving local state as-is */ }
@@ -873,6 +881,20 @@ function genCode(name){
   const num = Math.floor(100 + Math.random()*900);
   return letters + "-" + num;
 }
+// Regenerates genCode() until it lands on an access code not already used by
+// another project — the code doubles as the client's login credential, so a
+// collision would let one client see a different client's project.
+function genUniqueCode(name){
+  let code = genCode(name);
+  let attempts = 0;
+  while(state.projects.some(p=>p.accessCode===code) && attempts < 50){
+    code = genCode(name);
+    attempts++;
+  }
+  return code;
+}
+function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+function isValidPhone(v){ const digits = (v||"").replace(/[^\d]/g,""); return digits.length >= 7 && digits.length <= 15; }
 function uid(){ return "p_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
 function qItemId(){ return "qi_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
 function roomId(){ return "rm_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
@@ -3150,24 +3172,37 @@ function renderDesignerModal(){
     if(submitBtn && submitBtn.disabled) return; // already processing this submit — ignore a rapid repeat click/Enter
     const fd = new FormData(e.target);
     const name = (fd.get("name")||"").trim();
+    const email = (fd.get("email")||"").trim();
+    const phone = (fd.get("phone")||"").trim();
     const errEl = document.getElementById("designerFormError");
-    if(!name){
-      errEl.textContent = "Please enter the designer's full name to continue.";
+    ["name","email","phone"].forEach(n=>{
+      const el = e.target.querySelector(`[name="${n}"]`);
+      if(el) el.style.borderColor = "";
+    });
+    const showInvalid = (fieldName, msg)=>{
+      errEl.textContent = msg;
       errEl.style.display = "block";
-      document.querySelector('[name="name"]').focus();
-      return;
+      const el = e.target.querySelector(`[name="${fieldName}"]`);
+      if(el){ el.style.borderColor = "var(--clay)"; el.focus(); }
+    };
+    if(!name){ showInvalid("name", "Please enter the designer's full name to continue."); return; }
+    if(email && !isValidEmail(email)){ showInvalid("email", "Please enter a valid email address."); return; }
+    if(phone && !isValidPhone(phone)){ showInvalid("phone", "Please enter a valid phone number."); return; }
+    if(email){
+      const dupe = state.designers.find(x=>x.id!==d.id && (x.email||"").trim().toLowerCase() === email.toLowerCase());
+      if(dupe && !confirm(`Another designer (${dupe.name}) already uses this email. Save anyway?`)) return;
     }
     errEl.style.display = "none";
     if(submitBtn) submitBtn.disabled = true;
     const updated = {
       id: d.id,
       name,
-      role: fd.get("role")||"",
-      email: fd.get("email")||"",
-      phone: fd.get("phone")||"",
+      role: (fd.get("role")||"").trim(),
+      email,
+      phone,
       photo: fd.get("photo")||"",
-      bio: fd.get("bio")||"",
-      employeeId: fd.get("employeeId")||"",
+      bio: (fd.get("bio")||"").trim(),
+      employeeId: (fd.get("employeeId")||"").trim(),
       status: fd.get("status")||"active"
     };
     if(isNew){ state.designers.push(updated); } else {
@@ -3231,7 +3266,7 @@ function renderModal(){
     productionPaymentAmount:"",
     productionPaymentStatus:"not_submitted", productionPaymentReferenceNote:"", productionPaymentSubmittedAt:"", productionPaymentVerifiedAt:"", productionPaymentRejectionNote:"",
     lostAt:"", lostReason:"", preLostStatus:"", reconsideredAt:"", reconsiderRequestNotes:"", referrals:[],
-    details:"", accessCode: genCode("PRJ"), welcomeMessage: DEFAULT_WELCOME_MESSAGE, initialQuotation:"", quotationSavedAt:""
+    details:"", accessCode: genUniqueCode("PRJ"), welcomeMessage: DEFAULT_WELCOME_MESSAGE, initialQuotation:"", quotationSavedAt:""
   } : state.projects.find(x=>x.id===state.editing);
 
   const isNew = state.editing === "new";
@@ -3632,42 +3667,61 @@ function renderModal(){
     const fd = new FormData(e.target);
     const clientName = (fd.get("clientName")||"").trim();
     const projectName = (fd.get("projectName")||"").trim();
+    const clientEmail = (fd.get("clientEmail")||"").trim();
+    const clientPhone = (fd.get("clientPhone")||"").trim();
+    const budget = (fd.get("budget")||"").trim();
+    const contractValue = (fd.has("contractValue") ? fd.get("contractValue") : (p.contractValue||"")).toString().trim();
+    const designAgreementValue = (fd.has("designAgreementValue") ? fd.get("designAgreementValue") : (p.designAgreementValue||"")).toString().trim();
     const errEl = document.getElementById("formError");
-    if(!clientName || !projectName){
-      errEl.textContent = "Please fill in both Client Name and Project Name to continue.";
+    ["clientName","projectName","clientEmail","clientPhone","budget","contractValue","designAgreementValue"].forEach(n=>{
+      const el = e.target.querySelector(`[name="${n}"]`);
+      if(el) el.style.borderColor = "";
+    });
+    const showInvalid = (name, msg)=>{
+      errEl.textContent = msg;
       errEl.style.display = "block";
-      if(!clientName) document.querySelector('[name="clientName"]').focus();
-      else document.querySelector('[name="projectName"]').focus();
-      return;
+      const el = e.target.querySelector(`[name="${name}"]`);
+      if(el){ el.style.borderColor = "var(--clay)"; el.focus(); }
+    };
+    if(!clientName){ showInvalid("clientName", "Please fill in Client Name to continue."); return; }
+    if(!projectName){ showInvalid("projectName", "Please fill in Project Name to continue."); return; }
+    if(clientEmail && !isValidEmail(clientEmail)){ showInvalid("clientEmail", "Please enter a valid client email address."); return; }
+    if(clientPhone && !isValidPhone(clientPhone)){ showInvalid("clientPhone", "Please enter a valid client phone number."); return; }
+    if(budget && (isNaN(Number(budget)) || Number(budget) < 0)){ showInvalid("budget", "Budget can't be negative."); return; }
+    if(contractValue && (isNaN(Number(contractValue)) || Number(contractValue) < 0)){ showInvalid("contractValue", "Production Contract Value can't be negative."); return; }
+    if(designAgreementValue && (isNaN(Number(designAgreementValue)) || Number(designAgreementValue) < 0)){ showInvalid("designAgreementValue", "Design Fee can't be negative."); return; }
+    if(isNew && (clientEmail || clientPhone)){
+      const dupe = state.projects.find(x=>
+        (clientEmail && (x.clientEmail||"").trim().toLowerCase() === clientEmail.toLowerCase()) ||
+        (clientPhone && (x.clientPhone||"").replace(/[^\d]/g,"") === clientPhone.replace(/[^\d]/g,""))
+      );
+      if(dupe && !confirm(`A project already exists for this client (${dupe.projectName || dupe.clientName}). Create another project for them anyway?`)) return;
     }
     errEl.style.display = "none";
     if(submitBtn) submitBtn.disabled = true;
     const newStatus = fd.get("status");
     const movedBackToDiscussion = newStatus === "In Discussion" && p.status !== "In Discussion";
     const designDevIdx = STAGES.indexOf("Design Development");
+    const inProgressIdx = STAGES.indexOf("In Progress");
     const movedOutOfDesignPhase = STAGES.indexOf(p.status) >= designDevIdx && STAGES.indexOf(newStatus) < designDevIdx;
+    const enteredProductionPhase = STAGES.indexOf(newStatus) >= inProgressIdx && STAGES.indexOf(p.status) < inProgressIdx;
     const resetDesignWizard = movedBackToDiscussion || movedOutOfDesignPhase;
     const updated = {
+      ...p,
       id: p.id,
-      clientName: clientName, clientSalutation: fd.get("clientSalutation"), clientEmail: fd.get("clientEmail"), clientPhone: fd.get("clientPhone"),
+      clientName: clientName, clientSalutation: fd.get("clientSalutation"), clientEmail: clientEmail, clientPhone: clientPhone,
       projectName: projectName, projectType: fd.get("projectType"),
-      propertyAddress: fd.get("propertyAddress"), budget: fd.get("budget"),
-      targetCompletion: fd.get("targetCompletion"), details: fd.get("details"),
-      status: newStatus, accessCode: fd.get("accessCode") || genCode(projectName),
-      contractValue: fd.has("contractValue") ? fd.get("contractValue") : p.contractValue,
+      propertyAddress: (fd.get("propertyAddress")||"").trim(), budget: budget,
+      targetCompletion: (fd.get("targetCompletion")||"").trim(), details: (fd.get("details")||"").trim(),
+      status: newStatus, accessCode: fd.get("accessCode") || genUniqueCode(projectName),
+      contractValue: contractValue,
       contractSignedDate: fd.has("contractSignedDate") ? fd.get("contractSignedDate") : p.contractSignedDate,
-      contractNotes: fd.has("contractNotes") ? fd.get("contractNotes") : p.contractNotes,
-      designAgreementValue: fd.has("designAgreementValue") ? fd.get("designAgreementValue") : p.designAgreementValue,
+      contractNotes: (fd.has("contractNotes") ? fd.get("contractNotes") : (p.contractNotes||"")).toString().trim(),
+      designAgreementValue: designAgreementValue,
       productionPaymentAmount: fd.has("productionPaymentAmount") ? fd.get("productionPaymentAmount") : p.productionPaymentAmount,
       designAgreementSignedDate: movedBackToDiscussion ? "" : (fd.has("designAgreementSignedDate") ? fd.get("designAgreementSignedDate") : p.designAgreementSignedDate),
-      designAgreementNotes: fd.has("designAgreementNotes") ? fd.get("designAgreementNotes") : p.designAgreementNotes,
-      designAgreementPaymentInfo: fd.has("designAgreementPaymentInfo") ? fd.get("designAgreementPaymentInfo") : p.designAgreementPaymentInfo,
-      designerName: p.designerName,
-      designerRole: p.designerRole,
-      designerPhoto: p.designerPhoto,
-      designerEmail: p.designerEmail,
-      designerPhone: p.designerPhone,
-      designerBio: p.designerBio,
+      designAgreementNotes: (fd.has("designAgreementNotes") ? fd.get("designAgreementNotes") : (p.designAgreementNotes||"")).toString().trim(),
+      designAgreementPaymentInfo: (fd.has("designAgreementPaymentInfo") ? fd.get("designAgreementPaymentInfo") : (p.designAgreementPaymentInfo||"")).toString().trim(),
       assignedDesignerId: fd.has("assignedDesignerId") ? fd.get("assignedDesignerId") : (p.assignedDesignerId || ""),
       designWelcomeSeen: resetDesignWizard ? false : (p.designWelcomeSeen || false),
       designerIntroSeen: resetDesignWizard ? false : (p.designerIntroSeen || false),
@@ -3680,21 +3734,21 @@ function renderModal(){
       paymentSubmittedAt: movedBackToDiscussion ? "" : p.paymentSubmittedAt,
       paymentVerifiedAt: movedBackToDiscussion ? "" : p.paymentVerifiedAt,
       paymentRejectionNote: movedBackToDiscussion ? "" : p.paymentRejectionNote,
-      welcomeMessage: fd.get("welcomeMessage"),
-      initialQuotation: p.initialQuotation,
+      welcomeMessage: (fd.get("welcomeMessage")||"").trim(),
       quotationSavedAt: movedBackToDiscussion ? "" : (p.quotationSavedAt || ""),
-      kycCompleted: p.kycCompleted || false,
-      kycFullName: p.kycFullName || "",
-      kycEmail: p.kycEmail || "",
-      kycAadhaarNumber: p.kycAadhaarNumber || "",
-      kycAddress: p.kycAddress || "",
-      kycSubmittedAt: p.kycSubmittedAt || "",
       lostAt: newStatus === "Lost" ? (p.lostAt || new Date().toISOString()) : "",
       lostReason: newStatus === "Lost" ? (fd.has("lostReason") ? fd.get("lostReason") : (p.lostReason||"")) : "",
       preLostStatus: newStatus === "Lost" ? (p.status !== "Lost" ? p.status : (p.preLostStatus||"")) : "",
-      reconsideredAt: p.reconsideredAt || "",
-      reconsiderRequestNotes: p.reconsiderRequestNotes || "",
-      referrals: p.referrals || []
+      // Keep the client's Design Phase wizard position in sync whenever
+      // studio changes the project's phase — not just moving backward
+      // (BUG-001), but also moving forward into Production: the client is
+      // advanced straight to the production step so the Production
+      // Agreement/Payment appear immediately (BUG-002/003), rather than
+      // waiting for them to click through the earlier wizard steps again.
+      // This only ever touches the step pointer: booking dates/times,
+      // payment history, KYC, and signed agreements are all preserved
+      // above via the spread and are untouched.
+      progressStep: resetDesignWizard ? "" : (enteredProductionPhase ? "production" : p.progressStep)
     };
     if(isNew){ state.projects.push(updated); } else {
       const i = state.projects.findIndex(x=>x.id===p.id);
