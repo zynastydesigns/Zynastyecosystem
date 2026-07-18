@@ -456,13 +456,13 @@
           </div>
           <div class="row-between">
             <label class="remember-me"><input type="checkbox" id="remember-me"> Remember me</label>
-            <a href="#" onclick="return false;">Forgot password?</a>
+            <a href="#" id="forgot-password-link" onclick="return false;">Forgot password?</a>
           </div>
           <div class="error-msg" id="error-msg"></div>
           <button type="submit" class="submit" id="login-submit-btn">Login</button>
           <div class="secure-note">🔒 Your data is secure and encrypted.</div>
         </form>
-        <div class="hint">Studio staff only. Contact your admin if you need an account or a password reset.</div>
+        <div class="hint" id="login-hint">Studio staff only. Contact your admin if you need an account or a password reset.</div>
         <div id="auth-toggle" style="text-align:center;margin-top:16px;font-size:13px;color:var(--teal);cursor:pointer;">New here? Create an account</div>
       </div>
     </div>
@@ -746,6 +746,14 @@
   const emailInput = document.getElementById('email');
   const passInput = document.getElementById('password');
   const errorMsg = document.getElementById('error-msg');
+  const forgotPasswordLink = document.getElementById('forgot-password-link');
+  const loginHint = document.getElementById('login-hint');
+  if(forgotPasswordLink && loginHint){
+    forgotPasswordLink.addEventListener('click', function(e){
+      e.preventDefault();
+      loginHint.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
   const whoEmail = document.getElementById('who-email');
   const avatarInitial = document.getElementById('avatar-initial');
   const avatarInitialTop = document.getElementById('avatar-initial-top');
@@ -850,6 +858,9 @@
   helpModalBackdrop.addEventListener('click', function(e){
     if(e.target === helpModalBackdrop) helpModalBackdrop.classList.remove('open');
   });
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && helpModalBackdrop.classList.contains('open')) helpModalBackdrop.classList.remove('open');
+  });
 
   // Shared code staff use to self-register. Visible in page source by
   // design — it only screens out random visitors, not a real secret.
@@ -950,7 +961,12 @@
     dashView.style.display = 'block';
     startPolling();
     startTokenRefresh();
-    switchView('overview');
+    let lastView = 'overview';
+    try{
+      const saved = sessionStorage.getItem('zynasty-crm-active-view');
+      if(saved && VIEWS[saved]) lastView = saved;
+    }catch(e){ /* ignore */ }
+    switchView(lastView);
     loadProfile();
   }
   function showLogin(){
@@ -997,6 +1013,7 @@
     });
     mainHeading.textContent = VIEWS[view].heading;
     if(view === 'leads'){ startLeadsPolling(); } else { stopLeadsPolling(); }
+    try{ sessionStorage.setItem('zynasty-crm-active-view', view); }catch(e){ /* ignore */ }
   }
   navOverview.addEventListener('click', ()=>{ switchView('overview'); closeSidebar(); });
   navProfile.addEventListener('click', ()=>{ switchView('profile'); closeSidebar(); });
@@ -1273,12 +1290,14 @@
   });
 
   deleteAccountBtn.addEventListener('click', async function(){
+    if(deleteAccountBtn.disabled) return;
     const typed = prompt('This permanently deletes your account and cannot be undone.\n\nType DELETE to confirm.');
     if(typed !== 'DELETE') return;
 
     const session = await loadSession();
     if(!session || !session.access_token){ showLogin(); return; }
 
+    deleteAccountBtn.disabled = true;
     deleteAccountBtn.textContent = 'Deleting…';
     try{
       const res = await fetch(`${SUPABASE_URL}/functions/v1/delete-account`, {
@@ -1302,6 +1321,7 @@
       showLogin();
       errorMsg.textContent = 'Deletion requested — your admin will remove your account shortly.';
     }finally{
+      deleteAccountBtn.disabled = false;
       deleteAccountBtn.textContent = 'Delete account';
     }
   });
@@ -1431,7 +1451,25 @@
     }
   }
 
-  async function saveProjects(list){
+  // protectedId (optional): the id of the one project this call is
+  // actually creating/updating. If given, we re-fetch the freshest server
+  // copy immediately before writing and merge it in for every OTHER
+  // project — so a Studio Portal or Client Portal edit that landed on a
+  // different project in the meantime isn't silently overwritten by this
+  // (possibly slightly stale) full-list write.
+  async function saveProjects(list, protectedId){
+    if(protectedId){
+      const fresh = await fetchProjects();
+      if(fresh){
+        fresh.forEach(freshProject=>{
+          if(freshProject.id === protectedId) return;
+          const idx = list.findIndex(x=>x.id===freshProject.id);
+          if(idx === -1) list.push(freshProject);
+          else list[idx] = freshProject;
+        });
+        list = list.filter(p => p.id === protectedId || fresh.some(f=>f.id===p.id));
+      }
+    }
     await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?on_conflict=key`, {
       method: 'POST',
       headers: { ...SB_HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
@@ -1482,6 +1520,12 @@
       const projects = await fetchProjects();
       if(projects === null) return; // couldn't reach Studio Portal data, don't lose the lead's stage change over it
       const projectId = "lead-" + lead.id;
+      const existing = projects.find(p => p.id === projectId);
+      if(existing){
+        // Already synced (e.g. from another open tab/session) — just link back, don't push a duplicate.
+        lead.projectKey = projectId;
+        return;
+      }
       projects.push({
         id: projectId,
         clientSalutation: lead.salutation || "",
@@ -1499,7 +1543,7 @@
         quotationSavedAt: null,
         fromLead: true
       });
-      await saveProjects(projects);
+      await saveProjects(projects, projectId);
       lead.projectKey = projectId;
     }catch(e){ console.error("Could not sync lead into Studio Portal projects", e); }
   }
@@ -1513,7 +1557,7 @@
       const idx = projects.findIndex(p => p.id === lead.projectKey);
       if(idx === -1) return;
       projects[idx].status = lead.stage === "Lost" ? "Lost" : "In Discussion";
-      await saveProjects(projects);
+      await saveProjects(projects, lead.projectKey);
     }catch(e){ console.error("Could not update synced project status", e); }
   }
 
@@ -1654,19 +1698,27 @@
 
   // ---------- Drag & drop: dragging a card onto another column updates its
   // stage the same way the dropdown does, saves immediately, and re-renders. ----------
+  const movingLeadIds = new Set();
   async function moveLeadToStage(id, newStage){
+    if(movingLeadIds.has(id)) return; // a move for this lead is already saving — ignore a rapid repeat drag/dropdown change
     const lead = currentLeads.find(l => l.id === id);
     if(!lead || lead.stage === newStage) return;
-    const wasVisible = leadShouldBeVisibleToStudio(lead.stage);
-    lead.stage = newStage;
-    lead.updatedAt = new Date().toISOString();
-    if(leadShouldBeVisibleToStudio(newStage) && !lead.projectKey){
-      await syncLeadToProjects(lead);
-    }else if(lead.projectKey && (newStage === "Lost" || wasVisible)){
-      await updateSyncedProjectStatus(lead);
+    movingLeadIds.add(id);
+    try{
+      const wasVisible = leadShouldBeVisibleToStudio(lead.stage);
+      lead.stage = newStage;
+      lead.updatedAt = new Date().toISOString();
+      if(leadShouldBeVisibleToStudio(newStage) && !lead.projectKey){
+        await syncLeadToProjects(lead);
+      }else if(lead.projectKey && (newStage === "Lost" || wasVisible)){
+        await updateSyncedProjectStatus(lead);
+      }
+      await saveLeads(currentLeads);
+      renderLeadsBoard(currentLeads);
+      refreshDashboardData();
+    }finally{
+      movingLeadIds.delete(id);
     }
-    await saveLeads(currentLeads);
-    renderLeadsBoard(currentLeads);
   }
 
   let draggedLeadId = null;
@@ -1712,13 +1764,21 @@
     await moveLeadToStage(id, e.target.value);
   });
 
+  const deletingLeadIds = new Set();
   leadsBoard.addEventListener('click', async function(e){
     if(!e.target.classList.contains('lc-delete')) return;
     const id = e.target.getAttribute('data-lead-id');
+    if(deletingLeadIds.has(id)) return; // already removing this lead — ignore a rapid repeat click
     if(!confirm('Remove this lead from the board? Any Studio Portal project already created from it will stay untouched.')) return;
-    currentLeads = currentLeads.filter(l => l.id !== id);
-    await saveLeads(currentLeads);
-    renderLeadsBoard(currentLeads);
+    deletingLeadIds.add(id);
+    try{
+      currentLeads = currentLeads.filter(l => l.id !== id);
+      await saveLeads(currentLeads);
+      renderLeadsBoard(currentLeads);
+      refreshDashboardData();
+    }finally{
+      deletingLeadIds.delete(id);
+    }
   });
 
   newLeadToggle.addEventListener('click', function(){
@@ -1756,6 +1816,7 @@
       currentLeads.push(lead);
       await saveLeads(currentLeads);
       renderLeadsBoard(currentLeads);
+      refreshDashboardData();
       newLeadFormPanel.style.display = 'none';
       [leadSalutationInput, leadNameInput, leadEmailInput, leadPhoneInput, leadProjectNameInput, leadProjectTypeInput, leadPropertyAddressInput, leadBudgetInput, leadProjectStartInput, leadNotesInput]
         .forEach(el => el.value = '');

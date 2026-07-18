@@ -559,6 +559,83 @@ function generateAgreementPdf(project){
   doc.text(acceptedNote, margin, y);
   doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Design-Booking-Agreement.pdf");
 }
+function buildProductionAgreementText(clientName){
+  const name = clientName || "the Client";
+  return `Zynasty Design – Production Stage Agreement
+
+This agreement confirms the commencement of the production stage for ${name}'s project with Zynasty Design.
+
+1. Material Verification & Approval
+
+Once the selected materials arrive at our manufacturing facility, ${name} must verify the approved brands, finishes, colors, and overall quality before production begins.
+
+${name} may choose either:
+
+- Digital Approval (photos/videos shared by Zynasty Design), or
+- Physical Verification by visiting the vendor/manufacturing facility.
+
+Production will begin only after ${name} provides approval.
+
+2. Material Confirmation
+
+After ${name} approves the materials and production begins (cutting, edge banding, lamination, machining, etc.), no replacement, exchange, or change of material, finish, brand, or color will be permitted, as the materials become customized for the project.
+
+3. Payment Confirmation
+
+By accepting this agreement, ${name} agrees to pay 50% of the total quotation value (inclusive of the booking amount already paid) as the production-stage payment.
+
+Production and material procurement will commence only after this payment is successfully received.
+
+4. Dispatch & Installation
+
+Once production is completed and the required payment has been received, the materials will be dispatched to the project site and installation will commence.
+
+5. Cancellation & Refund Policy
+
+${name} may cancel the order before the material procurement process begins, provided the cancellation request is made before the end of the same day on which this agreement is accepted.
+
+Once materials have been ordered from suppliers or production has commenced, the order becomes non-refundable, as the materials are procured and manufactured specifically for the project.
+
+6. Acceptance
+
+By accepting this agreement, ${name} acknowledges that they understand the production process, agree to the payment milestones, and accept the above cancellation and refund policy.`;
+}
+
+function generateProductionAgreementPdf(project){
+  if(!window.jspdf || !window.jspdf.jsPDF){
+    alert("PDF library did not load — check your internet connection and try again.");
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:"pt", format:"a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 48;
+  const maxWidth = pageWidth - margin*2;
+  const clientName = formatClientName(project);
+  const text = buildProductionAgreementText(clientName);
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(11);
+  const lines = doc.splitTextToSize(text, maxWidth);
+  let y = margin;
+  const lineHeight = 15;
+  lines.forEach(line=>{
+    if(y > pageHeight - margin){
+      doc.addPage();
+      y = margin;
+    }
+    doc.text(line, margin, y);
+    y += lineHeight;
+  });
+  if(y > pageHeight - margin - 40){ doc.addPage(); y = margin; }
+  y += 20;
+  doc.setFont("helvetica","italic");
+  const acceptedNote = project.productionAgreementAcceptedAt
+    ? `Digitally accepted by ${clientName} on ${new Date(project.productionAgreementAcceptedAt).toLocaleString()}.`
+    : `Prepared for ${clientName}.`;
+  doc.text(acceptedNote, margin, y);
+  doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Production-Stage-Agreement.pdf");
+}
 const STAGE_COLORS = ["#B5654A","#C08A4E","#A9814F","#8C8F5E","#74845F","#5F7A56"];
 const STORAGE_KEY = "projects";
 const PRESETS_KEY = "itemPresets";
@@ -595,11 +672,12 @@ const DEFAULT_PRESETS = [
 
 let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, showDsRoomPicker: false, dsRoomPickerName: "" };
 
-// Pushes a history entry when the project edit sheet opens, so the
-// mobile/browser back gesture closes the sheet instead of navigating the
-// page away. popEditHistoryIfNeeded() consumes that entry again whenever
-// the sheet is closed through the UI (Save, Cancel, tapping outside, or
-// navigating to another screen from within it).
+// Pushes a history entry whenever a modal/overlay opens, so the
+// mobile/browser back gesture closes it instead of navigating the page
+// away. popEditHistoryIfNeeded() consumes that entry again whenever the
+// modal is closed through the UI (Save, Cancel, tapping outside, or a
+// successful action) — used for the project edit sheet, the designer
+// modal, both delete-confirm dialogs, and the room/preset pickers.
 function pushEditHistory(){
   try{ history.pushState({ sheet: "edit" }, ""); }catch(e){ /* ignore */ }
 }
@@ -617,10 +695,48 @@ function closeEditSheetUI(){
   popEditHistoryIfNeeded();
 }
 window.addEventListener("popstate", ()=>{
-  if(state.editing !== null){
+  // Close whichever modal/overlay is currently open, innermost first.
+  if(state.confirmDelete !== null){
+    state.confirmDelete = null;
+    const el = document.getElementById("confirmOverlay");
+    if(el) el.remove();
+  }else if(state.confirmDeleteDesigner !== null){
+    state.confirmDeleteDesigner = null;
+    const el = document.getElementById("confirmDesignerOverlay");
+    if(el) el.remove();
+  }else if(state.showPresetPicker){
+    state.showPresetPicker = false;
+    state.presetPickerRoomId = null;
+    const el = document.getElementById("presetPickerOverlay");
+    if(el) el.remove();
+  }else if(state.showRoomPicker){
+    state.showRoomPicker = false;
+    const el = document.getElementById("roomPickerOverlay");
+    if(el) el.remove();
+  }else if(state.showDsRoomPicker){
+    state.showDsRoomPicker = false;
+    const el = document.getElementById("dsRoomPickerOverlay");
+    if(el) el.remove();
+  }else if(state.editingDesigner !== null){
+    state.editingDesigner = null;
+    const el = document.getElementById("designerOverlay");
+    if(el) el.remove();
+  }else if(state.editing !== null){
     state.editing = null;
-    const overlay = document.getElementById("overlay");
-    if(overlay) overlay.remove();
+    const el = document.getElementById("overlay");
+    if(el) el.remove();
+  }
+});
+
+// ESC closes whichever modal/overlay is currently open (innermost first),
+// by reusing the same "click the background" handler each overlay already
+// has for outside-click-to-close — so the closing logic lives in one place.
+window.addEventListener("keydown",(e)=>{
+  if(e.key !== "Escape") return;
+  const ids = ["confirmOverlay","confirmDesignerOverlay","presetPickerOverlay","roomPickerOverlay","dsRoomPickerOverlay","designerOverlay","overlay"];
+  for(const id of ids){
+    const el = document.getElementById(id);
+    if(el){ el.click(); return; }
   }
 });
 
@@ -662,35 +778,32 @@ async function loadProjects(){
   render();
 }
 
-async function saveProjects(protectedId, excludeIds){
+async function saveProjects(excludeIds){
+  const excluded = new Set(excludeIds || []);
   try{
     // Before overwriting the whole shared "projects" blob, pull the latest
-    // copy and merge it in for every project OTHER than the one actually
-    // being saved right now. Without this, this browser's in-memory
-    // snapshot (which can be minutes old) would blindly stomp the entire
-    // list — silently erasing any payment submission, phase move, or other
-    // client-made update that landed on ANY project in the meantime.
-    // protectedId defaults to state.editing, but callers that already
-    // cleared state.editing before saving (e.g. to close the sheet
-    // immediately) must pass the id explicitly, or this merge will filter
-    // out a brand-new project entirely (it doesn't exist in freshList yet)
-    // and overwrite in-flight edits to an existing one.
-    // excludeIds lists projects intentionally deleted in this save, so the
-    // merge doesn't resurrect them from the (not-yet-updated) remote copy.
-    if(protectedId === undefined) protectedId = state.editing;
-    const excluded = excludeIds || [];
+    // copy and merge it in for every project OTHER than the one currently
+    // open for editing. Without this, this browser's in-memory snapshot
+    // (which can be minutes old) would blindly stomp the entire list —
+    // silently erasing any payment submission, phase move, or other
+    // client-made update that landed on ANY project in the meantime. The
+    // project actively being edited is left as-is so studio's own in-flight
+    // edits here still win. Projects passed in excludeIds (e.g. one just
+    // deleted by this same call) are never re-added from the fresh copy —
+    // otherwise a delete could be silently undone by this same merge.
     try{
       const res = await window.storage.get(STORAGE_KEY, true);
       const freshList = res && res.value ? JSON.parse(res.value) : null;
       if(freshList){
         freshList.forEach(freshProject=>{
-          if(freshProject.id === protectedId || excluded.includes(freshProject.id)) return;
+          if(freshProject.id === state.editing) return;
+          if(excluded.has(freshProject.id)) return;
           const idx = state.projects.findIndex(x=>x.id===freshProject.id);
           if(idx === -1) state.projects.push(freshProject);
           else state.projects[idx] = freshProject;
         });
         state.projects = state.projects.filter(p=>
-          p.id === protectedId || freshList.some(f=>f.id===p.id)
+          !excluded.has(p.id) && (p.id === state.editing || freshList.some(f=>f.id===p.id))
         );
       }
     }catch(e){ /* if the pre-save refresh fails, fall back to saving local state as-is */ }
@@ -1134,6 +1247,17 @@ async function generateAndStoreQuotationPdf(project, quotation){
   return pdfDataUrl;
 }
 
+// Same PDF, saved under its own key so the Final Quotation (Production
+// stage) can live alongside the Initial Quotation without overwriting it.
+async function generateAndStoreFinalQuotationPdf(project, quotation){
+  const pdfDataUrl = await generateQuotationPdf(project, quotation);
+  const result = await window.storage.set("final-quotation-pdf:" + project.id, pdfDataUrl, true);
+  if(!result){
+    throw new Error("Storage rejected the PDF save (it may be too large).");
+  }
+  return pdfDataUrl;
+}
+
 // ---------------------------------------------------------------------
 // Design Studio: 3D renders + material selection, organized by room,
 // mirroring the Quotation Builder's room-based structure. Each uploaded
@@ -1370,6 +1494,7 @@ function attachDesignStudioHandlers(){
     state.showDsRoomPicker = true;
     state.dsRoomPickerName = "";
     render();
+    pushEditHistory();
   };
 
   document.querySelectorAll(".ds-room-name").forEach(inp=>{
@@ -1377,7 +1502,7 @@ function attachDesignStudioHandlers(){
       const data = designStudioTabData(p, state.designStudioTab);
       const room = data.rooms.find(r=>r.id===inp.dataset.room);
       if(room) room.name = inp.value;
-      await saveProjects(p.id);
+      await saveProjects();
     });
   });
 
@@ -1390,7 +1515,7 @@ function attachDesignStudioHandlers(){
       const imageIds = room.images || [];
       data.rooms = data.rooms.filter(r=>r.id!==b.dataset.room);
       render();
-      await saveProjects(p.id);
+      await saveProjects();
       await Promise.all(imageIds.map(id=>window.storage.delete("design-image:"+id, true).catch(()=>{})));
     });
   });
@@ -1417,7 +1542,7 @@ function attachDesignStudioHandlers(){
         }
       }
       render();
-      await saveProjects(p.id);
+      await saveProjects();
     });
   });
 
@@ -1428,7 +1553,7 @@ function attachDesignStudioHandlers(){
       if(!room) return;
       room.images = room.images.filter(id=>id!==b.dataset.img);
       render();
-      await saveProjects(p.id);
+      await saveProjects();
       try{ await window.storage.delete("design-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
     });
   });
@@ -1693,6 +1818,7 @@ function renderQuotation(){
     <div class="quote-actions">
       <button type="button" class="btn" id="saveQuoteBtn">Save Quotation</button>
       <button type="button" class="btn ghost" id="useAsQuoteBtn">Use Total as Initial Quotation</button>
+      <button type="button" class="btn ghost" id="useAsFinalQuoteBtn">${project.finalQuotation ? "Update Final Quotation" : "Use Total as Final Quotation"}</button>
     </div>
   `;
 }
@@ -1884,6 +2010,7 @@ function attachQuotationHandlers(){
       state.presetPickerFilter = "";
       state.presetPickerRoomId = btn.dataset.roomId;
       render();
+      pushEditHistory();
     });
   });
   body.querySelectorAll(".room-remove-btn").forEach(btn=>{
@@ -1903,6 +2030,7 @@ function attachQuotationHandlers(){
       state.showRoomPicker = true;
       state.roomPickerName = "";
       render();
+      pushEditHistory();
     };
   }
 
@@ -1930,7 +2058,7 @@ function attachQuotationHandlers(){
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(project){
         project.quotationSavedAt = new Date().toISOString();
-        await saveProjects(project.id);
+        await saveProjects();
       }
       try{
         if(project){
@@ -1955,9 +2083,36 @@ function attachQuotationHandlers(){
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
       project.initialQuotation = Math.round(t.grandTotal);
-      await saveProjects(project.id);
+      await saveProjects();
       await saveQuotation();
       showToast("Initial Quotation updated to " + fmtMoney(project.initialQuotation) + ".", false);
+      render();
+    };
+  }
+
+  const useAsFinalQuoteBtn = document.getElementById("useAsFinalQuoteBtn");
+  if(useAsFinalQuoteBtn){
+    useAsFinalQuoteBtn.onclick = async ()=>{
+      syncQuoteItemsFromDOM();
+      const t = computeQuoteTotals(state.quotation);
+      const project = state.projects.find(p=>p.id===state.quotationProjectId);
+      if(!project) return;
+      const wasAlreadySet = !!project.finalQuotation;
+      project.finalQuotation = Math.round(t.grandTotal);
+      useAsFinalQuoteBtn.disabled = true;
+      const originalLabel = useAsFinalQuoteBtn.textContent;
+      useAsFinalQuoteBtn.textContent = wasAlreadySet ? "Updating…" : "Saving…";
+      await saveProjects();
+      await saveQuotation();
+      try{
+        await generateAndStoreFinalQuotationPdf(project, state.quotation);
+        showToast((wasAlreadySet ? "Final Quotation updated to " : "Final Quotation set to ") + fmtMoney(project.finalQuotation) + ".", false);
+      }catch(e){
+        console.error("Final Quotation PDF generation failed", e);
+        showToast("Final Quotation saved, but the PDF failed: " + (e && e.message ? e.message : "unknown error"), true);
+      }
+      useAsFinalQuoteBtn.disabled = false;
+      useAsFinalQuoteBtn.textContent = originalLabel;
       render();
     };
   }
@@ -2000,7 +2155,7 @@ function renderDsRoomPicker(){
   document.body.insertAdjacentHTML("beforeend", html);
 
   const overlayEl = document.getElementById("dsRoomPickerOverlay");
-  const closePicker = ()=>{ state.showDsRoomPicker=false; overlayEl.remove(); };
+  const closePicker = ()=>{ state.showDsRoomPicker=false; overlayEl.remove(); popEditHistoryIfNeeded(); };
   overlayEl.addEventListener("click",(e)=>{ if(e.target.id==="dsRoomPickerOverlay") closePicker(); });
   document.getElementById("dsRoomPickerClose").onclick = closePicker;
 
@@ -2013,7 +2168,8 @@ function renderDsRoomPicker(){
     data.rooms.push({ id: newRoomId(), name: trimmed, images: [] });
     state.showDsRoomPicker = false;
     render();
-    await saveProjects(p.id);
+    popEditHistoryIfNeeded();
+    await saveProjects();
   };
 
   document.querySelectorAll(".room-type-btn").forEach(btn=>{
@@ -2049,7 +2205,7 @@ function renderRoomPicker(){
   document.body.insertAdjacentHTML("beforeend", html);
 
   const overlayEl = document.getElementById("roomPickerOverlay");
-  const closePicker = ()=>{ state.showRoomPicker=false; overlayEl.remove(); };
+  const closePicker = ()=>{ state.showRoomPicker=false; overlayEl.remove(); popEditHistoryIfNeeded(); };
   overlayEl.addEventListener("click",(e)=>{ if(e.target.id==="roomPickerOverlay") closePicker(); });
   document.getElementById("roomPickerClose").onclick = closePicker;
 
@@ -2059,6 +2215,7 @@ function renderRoomPicker(){
     state.quotation.rooms.push(blankRoom({ name: trimmed }));
     state.showRoomPicker = false;
     render();
+    popEditHistoryIfNeeded();
   };
 
   document.querySelectorAll(".room-type-btn").forEach(btn=>{
@@ -2095,10 +2252,16 @@ function renderPresetPicker(){
   document.body.insertAdjacentHTML("beforeend", html);
 
   const overlayEl = document.getElementById("presetPickerOverlay");
-  overlayEl.addEventListener("click",(e)=>{ if(e.target.id==="presetPickerOverlay"){ state.showPresetPicker=false; state.presetPickerRoomId=null; overlayEl.remove(); }});
-  document.getElementById("presetPickerClose").onclick = ()=>{ state.showPresetPicker=false; state.presetPickerRoomId=null; overlayEl.remove(); };
+  overlayEl.addEventListener("click",(e)=>{ if(e.target.id==="presetPickerOverlay"){ state.showPresetPicker=false; state.presetPickerRoomId=null; overlayEl.remove(); popEditHistoryIfNeeded(); }});
+  document.getElementById("presetPickerClose").onclick = ()=>{ state.showPresetPicker=false; state.presetPickerRoomId=null; overlayEl.remove(); popEditHistoryIfNeeded(); };
   const searchEl = document.getElementById("presetSearch");
-  searchEl.oninput = (e)=>{ state.presetPickerFilter = e.target.value; render(); const s=document.getElementById("presetSearch"); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } };
+  searchEl.oninput = (e)=>{
+    state.presetPickerFilter = e.target.value;
+    const selStart = e.target.selectionStart, selEnd = e.target.selectionEnd;
+    render();
+    const s=document.getElementById("presetSearch");
+    if(s){ s.focus(); try{ s.setSelectionRange(selStart,selEnd); }catch(err){} }
+  };
   document.querySelectorAll(".picker-item").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const preset = state.itemPresets.find(p=>p.id===btn.dataset.presetId);
@@ -2111,6 +2274,7 @@ function renderPresetPicker(){
       state.showPresetPicker = false;
       state.presetPickerRoomId = null;
       render();
+      popEditHistoryIfNeeded();
     });
   });
 }
@@ -2201,9 +2365,18 @@ function attachPresetsHandlers(){
   const saveBtn = document.getElementById("savePresetsBtn");
   if(saveBtn){
     saveBtn.onclick = async ()=>{
+      if(saveBtn.disabled) return;
       syncPresetsFromDOM();
-      await saveItemPresets();
-      showToast("Item presets saved.", false);
+      saveBtn.disabled = true;
+      const originalLabel = saveBtn.textContent;
+      saveBtn.textContent = "Saving…";
+      try{
+        await saveItemPresets();
+        showToast("Item presets saved.", false);
+      }finally{
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalLabel;
+      }
       render();
     };
   }
@@ -2269,17 +2442,21 @@ function render(){
   const main = document.getElementById("main");
 
   if(state.screen !== "quotation"){
+    const pickerWasOpen = state.showPresetPicker || state.showRoomPicker;
     state.showPresetPicker = false;
     state.showRoomPicker = false;
     const stalePicker = document.getElementById("presetPickerOverlay");
     if(stalePicker) stalePicker.remove();
     const staleRoomPicker = document.getElementById("roomPickerOverlay");
     if(staleRoomPicker) staleRoomPicker.remove();
+    if(pickerWasOpen) popEditHistoryIfNeeded();
   }
   if(state.screen !== "designStudio"){
+    const dsPickerWasOpen = state.showDsRoomPicker;
     state.showDsRoomPicker = false;
     const staleDsRoomPicker = document.getElementById("dsRoomPickerOverlay");
     if(staleDsRoomPicker) staleDsRoomPicker.remove();
+    if(dsPickerWasOpen) popEditHistoryIfNeeded();
   }
 
   const headerBack = document.getElementById("headerBack");
@@ -2705,6 +2882,86 @@ function attachPaymentVerificationHandlers(){
   }
 }
 
+// ---- Production-stage payment verification (same pattern as the design
+// fee panel above, but for the 50% Production Stage payment and its own
+// storage key/fields, so the two don't collide). ----
+function productionPaymentVerificationInnerHtml(p){
+  return p.productionPaymentStatus === "verified"
+    ? `<div style="color:#3a5c33;">✓ Payment verified on ${escapeHtml((p.productionPaymentVerifiedAt||"").slice(0,10))}. Reference: ${escapeHtml(p.productionPaymentReferenceNote||"—")}</div>`
+    : p.productionPaymentStatus === "submitted"
+    ? `<div style="color:#8a6d1f;margin-bottom:10px;">⏳ Payment proof submitted on ${escapeHtml((p.productionPaymentSubmittedAt||"").slice(0,10))}. Reference: ${escapeHtml(p.productionPaymentReferenceNote||"—")}</div>
+       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+         <button type="button" class="btn ghost" id="viewProductionPaymentProofBtn" data-id="${p.id}">View Proof Image</button>
+         <button type="button" class="btn" id="verifyProductionPaymentBtn" data-id="${p.id}">✓ Verify Payment</button>
+         <button type="button" class="btn ghost" id="rejectProductionPaymentBtn" data-id="${p.id}">✗ Reject</button>
+       </div>
+       <input type="text" id="productionPaymentRejectionNoteInput" placeholder="Reason for rejection (shown to client)" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:13px;">
+       <div id="productionPaymentProofPreview" style="margin-top:10px;"></div>`
+    : p.productionPaymentStatus === "rejected"
+    ? `<div style="color:#a33d3d;margin-bottom:8px;">✗ Payment proof was rejected on ${escapeHtml((p.productionPaymentVerifiedAt||"").slice(0,10))}. Reason given to client: ${escapeHtml(p.productionPaymentRejectionNote||"—")}</div>
+       <div style="display:flex;gap:10px;flex-wrap:wrap;">
+         <button type="button" class="btn ghost" id="viewProductionPaymentProofBtn" data-id="${p.id}">View Last Proof Image</button>
+       </div>
+       <div id="productionPaymentProofPreview" style="margin-top:10px;"></div>`
+    : `<div style="color:var(--slate);">Client has not submitted the production-stage payment proof yet.</div>`;
+}
+
+function refreshProductionPaymentVerificationPanel(project){
+  const panel = document.getElementById("productionPaymentVerificationPanel");
+  if(panel){
+    panel.innerHTML = productionPaymentVerificationInnerHtml(project);
+  }
+  attachProductionPaymentVerificationHandlers();
+}
+function attachProductionPaymentVerificationHandlers(){
+  const viewProductionPaymentProofBtn = document.getElementById("viewProductionPaymentProofBtn");
+  if(viewProductionPaymentProofBtn){
+    viewProductionPaymentProofBtn.onclick = async ()=>{
+      const preview = document.getElementById("productionPaymentProofPreview");
+      preview.textContent = "Loading…";
+      try{
+        const res = await window.storage.get("production-payment-proof:" + viewProductionPaymentProofBtn.dataset.id, true);
+        if(res && res.value){
+          preview.innerHTML = `<img src="${res.value}" style="max-width:100%;border:1px solid var(--line);border-radius:8px;">`;
+        } else {
+          preview.textContent = "No proof image found.";
+        }
+      }catch(e){
+        preview.textContent = "Could not load proof image.";
+      }
+    };
+  }
+  const verifyProductionPaymentBtn = document.getElementById("verifyProductionPaymentBtn");
+  if(verifyProductionPaymentBtn){
+    verifyProductionPaymentBtn.onclick = async ()=>{
+      const project = state.projects.find(x=>x.id===verifyProductionPaymentBtn.dataset.id);
+      if(!project) return;
+      project.productionPaymentStatus = "verified";
+      project.productionPaymentVerifiedAt = new Date().toISOString();
+      project.productionPaymentRejectionNote = "";
+      verifyProductionPaymentBtn.disabled = true;
+      verifyProductionPaymentBtn.textContent = "Saving…";
+      await saveProjects();
+      refreshProductionPaymentVerificationPanel(project);
+    };
+  }
+  const rejectProductionPaymentBtn = document.getElementById("rejectProductionPaymentBtn");
+  if(rejectProductionPaymentBtn){
+    rejectProductionPaymentBtn.onclick = async ()=>{
+      const project = state.projects.find(x=>x.id===rejectProductionPaymentBtn.dataset.id);
+      if(!project) return;
+      const noteInput = document.getElementById("productionPaymentRejectionNoteInput");
+      project.productionPaymentStatus = "rejected";
+      project.productionPaymentVerifiedAt = new Date().toISOString();
+      project.productionPaymentRejectionNote = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
+      rejectProductionPaymentBtn.disabled = true;
+      rejectProductionPaymentBtn.textContent = "Saving…";
+      await saveProjects();
+      refreshProductionPaymentVerificationPanel(project);
+    };
+  }
+}
+
 // Live-patch just the Payment Verification panel of an open project modal
 // with fresh data from storage, without touching the rest of the form (so
 // any unsaved edits the studio user is mid-typing elsewhere aren't lost).
@@ -2727,6 +2984,28 @@ async function refreshPaymentVerificationIfEditing(){
   paymentFields.forEach(k=>{ localProject[k] = freshProject[k]; });
   panel.innerHTML = paymentVerificationInnerHtml(localProject);
   attachPaymentVerificationHandlers();
+}
+
+// Same live-patch behaviour as above, for the Production Stage payment panel.
+async function refreshProductionPaymentVerificationIfEditing(){
+  if(state.editing === null || state.editing === "new") return;
+  const panel = document.getElementById("productionPaymentVerificationPanel");
+  if(!panel || panel.dataset.projectId !== state.editing) return;
+  let freshList;
+  try{
+    const res = await window.storage.get(STORAGE_KEY, true);
+    freshList = res && res.value ? JSON.parse(res.value) : null;
+  }catch(e){ return; }
+  if(!freshList) return;
+  const freshProject = freshList.find(x=>x.id===state.editing);
+  const localProject = state.projects.find(x=>x.id===state.editing);
+  if(!freshProject || !localProject) return;
+  const productionPaymentFields = ["productionPaymentStatus","productionPaymentReferenceNote","productionPaymentSubmittedAt","productionPaymentVerifiedAt","productionPaymentRejectionNote"];
+  const changed = productionPaymentFields.some(k=>freshProject[k] !== localProject[k]);
+  if(!changed) return;
+  productionPaymentFields.forEach(k=>{ localProject[k] = freshProject[k]; });
+  panel.innerHTML = productionPaymentVerificationInnerHtml(localProject);
+  attachProductionPaymentVerificationHandlers();
 }
 
 function renderDesigners(){
@@ -2785,13 +3064,13 @@ function renderDesigners(){
 
 function attachDesignersHandlers(){
   const addBtn = document.getElementById("addDesignerBtn");
-  if(addBtn) addBtn.onclick = ()=>{ state.editingDesigner = "new"; render(); };
+  if(addBtn) addBtn.onclick = ()=>{ state.editingDesigner = "new"; render(); pushEditHistory(); };
 
   document.querySelectorAll(".editDesignerBtn").forEach(b=>{
-    b.addEventListener("click", ()=>{ state.editingDesigner = b.dataset.id; render(); });
+    b.addEventListener("click", ()=>{ state.editingDesigner = b.dataset.id; render(); pushEditHistory(); });
   });
   document.querySelectorAll(".deleteDesignerBtn").forEach(b=>{
-    b.addEventListener("click", ()=>{ state.confirmDeleteDesigner = b.dataset.id; render(); });
+    b.addEventListener("click", ()=>{ state.confirmDeleteDesigner = b.dataset.id; render(); pushEditHistory(); });
   });
   document.querySelectorAll(".toggleDesignerStatusBtn").forEach(b=>{
     b.addEventListener("click", async ()=>{
@@ -2851,11 +3130,24 @@ function renderDesignerModal(){
   </div>`;
   document.body.insertAdjacentHTML("beforeend", html);
 
-  document.getElementById("designerCancelBtn").onclick = ()=>{ state.editingDesigner = null; document.getElementById("designerOverlay").remove(); };
-  document.getElementById("designerOverlay").addEventListener("click",(e)=>{ if(e.target.id==="designerOverlay"){ state.editingDesigner=null; e.target.remove(); }});
+  document.getElementById("designerCancelBtn").onclick = ()=>{ state.editingDesigner = null; document.getElementById("designerOverlay").remove(); popEditHistoryIfNeeded(); };
+  document.getElementById("designerOverlay").addEventListener("click",(e)=>{ if(e.target.id==="designerOverlay"){ state.editingDesigner=null; e.target.remove(); popEditHistoryIfNeeded(); }});
+
+  // Pressing Enter in a text field is a common habit while tabbing through
+  // a multi-field form, but it would otherwise submit the whole form
+  // immediately. Only textareas keep native Enter behavior (newline); the
+  // submit button itself is unaffected, so a deliberate click/Enter-on-button
+  // still saves normally.
+  document.getElementById("designerForm").addEventListener("keydown",(e)=>{
+    if(e.key === "Enter" && e.target.tagName === "INPUT" && !["submit","button","checkbox","radio","file"].includes(e.target.type)){
+      e.preventDefault();
+    }
+  });
 
   document.getElementById("designerForm").onsubmit = async (e)=>{
     e.preventDefault();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if(submitBtn && submitBtn.disabled) return; // already processing this submit — ignore a rapid repeat click/Enter
     const fd = new FormData(e.target);
     const name = (fd.get("name")||"").trim();
     const errEl = document.getElementById("designerFormError");
@@ -2866,6 +3158,7 @@ function renderDesignerModal(){
       return;
     }
     errEl.style.display = "none";
+    if(submitBtn) submitBtn.disabled = true;
     const updated = {
       id: d.id,
       name,
@@ -2884,6 +3177,7 @@ function renderDesignerModal(){
     state.editingDesigner = null;
     document.getElementById("designerOverlay").remove();
     render();
+    popEditHistoryIfNeeded();
     await saveDesigners();
   };
 }
@@ -2907,14 +3201,15 @@ function renderConfirmDeleteDesigner(){
     </div>
   </div>`;
   document.body.insertAdjacentHTML("beforeend", html);
-  document.getElementById("confirmDesignerCancel").onclick = ()=>{ state.confirmDeleteDesigner=null; document.getElementById("confirmDesignerOverlay").remove(); };
-  document.getElementById("confirmDesignerOverlay").addEventListener("click",(e)=>{ if(e.target.id==="confirmDesignerOverlay"){ state.confirmDeleteDesigner=null; e.target.remove(); }});
+  document.getElementById("confirmDesignerCancel").onclick = ()=>{ state.confirmDeleteDesigner=null; document.getElementById("confirmDesignerOverlay").remove(); popEditHistoryIfNeeded(); };
+  document.getElementById("confirmDesignerOverlay").addEventListener("click",(e)=>{ if(e.target.id==="confirmDesignerOverlay"){ state.confirmDeleteDesigner=null; e.target.remove(); popEditHistoryIfNeeded(); }});
   document.getElementById("confirmDesignerDeleteBtn").onclick = async ()=>{
     const id = state.confirmDeleteDesigner;
     state.designers = state.designers.filter(x=>x.id!==id);
     state.confirmDeleteDesigner = null;
     document.getElementById("confirmDesignerOverlay").remove();
     render();
+    popEditHistoryIfNeeded();
     await saveDesigners();
   };
 }
@@ -2931,6 +3226,10 @@ function renderModal(){
     quotationAccepted:false, quotationAcceptedAt:"",
     paymentStatus:"not_submitted", paymentReferenceNote:"", paymentSubmittedAt:"", paymentVerifiedAt:"", paymentRejectionNote:"",
     kycCompleted:false, kycFullName:"", kycEmail:"", kycAadhaarNumber:"", kycAddress:"", kycSubmittedAt:"",
+    finalQuotation:"", finalQuotationAccepted:false, finalQuotationAcceptedAt:"",
+    productionAgreementAccepted:false, productionAgreementAcceptedAt:"",
+    productionPaymentAmount:"",
+    productionPaymentStatus:"not_submitted", productionPaymentReferenceNote:"", productionPaymentSubmittedAt:"", productionPaymentVerifiedAt:"", productionPaymentRejectionNote:"",
     lostAt:"", lostReason:"", preLostStatus:"", reconsideredAt:"", reconsiderRequestNotes:"", referrals:[],
     details:"", accessCode: genCode("PRJ"), welcomeMessage: DEFAULT_WELCOME_MESSAGE, initialQuotation:"", quotationSavedAt:""
   } : state.projects.find(x=>x.id===state.editing);
@@ -3007,6 +3306,35 @@ function renderModal(){
           <div class="field full"><label>Welcome Message</label><textarea name="welcomeMessage" placeholder="A warm note introducing the project and next steps…">${escapeHtml(p.welcomeMessage)}</textarea></div>
         </div>
 
+        ${p.status === "Lost" ? `
+        <div class="section-label">Lost / Rejected — Recovery</div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;color:var(--slate);">
+            Marked lost on ${escapeHtml(fmtDate((p.lostAt||"").slice(0,10)))}. Use the procedures below to leave the door open — the client can reconsider anytime from their portal, or submit a referral.
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field full"><label>Internal Notes (reason — not shown to client)</label><textarea name="lostReason" placeholder="e.g. Budget mismatch, went with another studio…">${escapeHtml(p.lostReason)}</textarea></div>
+        </div>
+        <div class="field-row">
+          <div class="field full" style="display:flex;gap:10px;flex-wrap:wrap;">
+            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostEmailHref(p)}" target="_blank" rel="noopener">✉️ Email Procedure</a>
+            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostWhatsAppHref(p)}" target="_blank" rel="noopener">💬 WhatsApp Procedure</a>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;">
+            <label style="display:block;margin-bottom:6px;">Referrals Received (${(p.referrals||[]).length})</label>
+            ${(p.referrals||[]).length
+              ? (p.referrals||[]).map(r=>`<div style="padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;">
+                   <div><strong>${escapeHtml(r.name||"—")}</strong> · ${escapeHtml(r.contact||"—")}</div>
+                   ${r.notes ? `<div style="color:var(--slate);margin-top:2px;">${escapeHtml(r.notes)}</div>` : ""}
+                   <div style="color:var(--slate);font-size:11.5px;margin-top:2px;">Submitted ${escapeHtml(fmtDate((r.submittedAt||"").slice(0,10)))}</div>
+                 </div>`).join("")
+              : `<div style="color:var(--slate);">No referrals submitted yet.</div>`}
+          </div>
+        </div>` : ""}
+
         ${STAGES.indexOf(p.status) >= 1 ? `
         <div class="section-label">Design Agreement</div>
         <div class="field-row">
@@ -3027,6 +3355,38 @@ function renderModal(){
         </div>` : ""}
 
         ${STAGES.indexOf(p.status) >= STAGES.indexOf("Design Development") ? `
+        <div class="section-label">Assigned Designer</div>
+        <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Shown to the client in their portal as a profile card once they view the Design & Development stage.</div>
+        <div class="field-row">
+          <div class="field full">
+            <label>Assign Designer</label>
+            <select name="assignedDesignerId" id="assignedDesignerSelect">
+              <option value="">— Select Designer —</option>
+              ${(state.designers||[]).filter(d=>d.status!=="inactive" || d.id===p.assignedDesignerId).map(d=>`<option value="${d.id}" ${p.assignedDesignerId===d.id?"selected":""}>${escapeHtml(d.name)}${d.status==="inactive"?" (Inactive)":""}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div id="assignedDesignerPreview">
+        ${(()=>{
+          const assigned = (state.designers||[]).find(d=>d.id===p.assignedDesignerId);
+          if(!assigned){
+            return !((state.designers||[]).length) ? `<div style="font-size:12.5px;color:var(--slate);margin-top:4px;">No designer profiles yet — create one to assign.</div>` : "";
+          }
+          const contactLine = [assigned.role, assigned.email, assigned.phone].filter(Boolean).join(" · ");
+          return `
+          <div style="display:flex;gap:14px;align-items:center;margin-top:6px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px;">
+            <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:18px;">
+              ${assigned.photo ? `<img src="${escapeAttr(assigned.photo)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((assigned.name||"?").trim().charAt(0).toUpperCase())}
+            </div>
+            <div style="font-size:13px;">
+              <div style="font-weight:600;">${escapeHtml(assigned.name)}</div>
+              ${contactLine ? `<div style="color:var(--slate);">${escapeHtml(contactLine)}</div>` : ""}
+            </div>
+          </div>`;
+        })()}
+        </div>
+        <div style="margin-top:10px;"><button type="button" class="btn ghost" id="manageDesignersFromModalBtn" style="padding:7px 12px;font-size:11.5px;">Manage Designer Profiles →</button></div>
+
         <div class="section-label" style="margin-top:22px;">Site Measurement Visit</div>
         <div class="field-row">
           <div class="field full" style="font-size:13px;" id="siteMeasurementPanel" data-project-id="${p.id}">
@@ -3037,7 +3397,32 @@ function renderModal(){
         <div class="section-label" style="margin-top:22px;">Design Studio</div>
         <div style="font-size:12px;color:var(--slate);margin:-4px 0 8px;">Upload 3D renders and material selection images for the client to review and download.</div>
         <div style="font-size:12.5px;color:var(--slate);margin-bottom:12px;" id="materialSlotPanel" data-project-id="${p.id}">${materialSlotInnerHtml(p)}</div>
-        <button type="button" class="btn ghost" id="openDesignStudioBtn" data-id="${p.id}">Open Design Studio →</button>` : ""}
+        <button type="button" class="btn ghost" id="openDesignStudioBtn" data-id="${p.id}">Open Design Studio →</button>
+
+        <div class="section-label" style="margin-top:22px;">Production Stage</div>
+        <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Shown to the client right after they complete Material Selection: the Production Stage Agreement, the Final Quotation, and the production-stage payment.</div>
+        <div class="field-row">
+          <div class="field"><label>Final Quotation</label><input type="text" value="${p.finalQuotation ? fmtMoney(p.finalQuotation) : "Not set — use the Quotation Builder"}" disabled></div>
+          <div class="field"><label>Production Payment Amount</label><input type="number" name="productionPaymentAmount" value="${escapeAttr(p.productionPaymentAmount)}" placeholder="${p.finalQuotation ? Math.round(Number(p.finalQuotation)*0.5) : 0} (default: 50% of final quotation)"></div>
+        </div>
+        <div style="margin-bottom:14px;"><button type="button" class="btn ghost" id="openQuoteBtnForFinal" data-id="${p.id}">Open Quotation Builder →</button></div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;color:${p.productionAgreementAccepted ? "#3a5c33" : "var(--slate)"};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+            <span>${p.productionAgreementAccepted ? `✓ Client has accepted the Production Stage Agreement on ${escapeHtml((p.productionAgreementAcceptedAt||"").slice(0,10))}.` : "Client has not yet accepted the Production Stage Agreement in the portal."}</span>
+            ${p.productionAgreementAccepted ? `<button type="button" class="btn ghost" id="downloadProductionAgreementBtn" data-id="${p.id}">Download Signed Agreement</button>` : ""}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;color:${p.finalQuotationAccepted ? "#3a5c33" : "var(--slate)"};">
+            ${p.finalQuotationAccepted ? `✓ Client accepted the Final Quotation on ${escapeHtml((p.finalQuotationAcceptedAt||"").slice(0,10))}.` : "Client has not yet accepted the Final Quotation in the portal."}
+          </div>
+        </div>
+        <div class="section-label" style="margin-top:18px;">Production Stage Payment Verification</div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;" id="productionPaymentVerificationPanel" data-project-id="${p.id}">
+            ${productionPaymentVerificationInnerHtml(p)}
+          </div>
+        </div>` : ""}
 
         ${STAGES.indexOf(p.status) >= 1 ? `
         <div class="section-label">Payment Verification</div>
@@ -3078,35 +3463,6 @@ function renderModal(){
           <div class="field full"><label>Production Agreement Notes</label><textarea name="contractNotes" placeholder="Terms, deposit, payment schedule…">${escapeHtml(p.contractNotes)}</textarea></div>
         </div>` : ""}
 
-        ${p.status === "Lost" ? `
-        <div class="section-label">Lost / Rejected — Recovery</div>
-        <div class="field-row">
-          <div class="field full" style="font-size:13px;color:var(--slate);">
-            Marked lost on ${escapeHtml(fmtDate((p.lostAt||"").slice(0,10)))}. Use the procedures below to leave the door open — the client can reconsider anytime from their portal, or submit a referral.
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field full"><label>Internal Notes (reason — not shown to client)</label><textarea name="lostReason" placeholder="e.g. Budget mismatch, went with another studio…">${escapeHtml(p.lostReason)}</textarea></div>
-        </div>
-        <div class="field-row">
-          <div class="field full" style="display:flex;gap:10px;flex-wrap:wrap;">
-            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostEmailHref(p)}" target="_blank" rel="noopener">✉️ Email Procedure</a>
-            <a class="btn ghost" style="flex:1;text-align:center;" href="${buildLostWhatsAppHref(p)}" target="_blank" rel="noopener">💬 WhatsApp Procedure</a>
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field full" style="font-size:13px;">
-            <label style="display:block;margin-bottom:6px;">Referrals Received (${(p.referrals||[]).length})</label>
-            ${(p.referrals||[]).length
-              ? (p.referrals||[]).map(r=>`<div style="padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;">
-                   <div><strong>${escapeHtml(r.name||"—")}</strong> · ${escapeHtml(r.contact||"—")}</div>
-                   ${r.notes ? `<div style="color:var(--slate);margin-top:2px;">${escapeHtml(r.notes)}</div>` : ""}
-                   <div style="color:var(--slate);font-size:11.5px;margin-top:2px;">Submitted ${escapeHtml(fmtDate((r.submittedAt||"").slice(0,10)))}</div>
-                 </div>`).join("")
-              : `<div style="color:var(--slate);">No referrals submitted yet.</div>`}
-          </div>
-        </div>` : ""}
-
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="cancelBtn">Cancel</button>
           <button type="submit" class="btn">${isNew ? "Add Project" : "Save Changes"}</button>
@@ -3118,6 +3474,35 @@ function renderModal(){
 
   document.getElementById("cancelBtn").onclick = ()=>{ closeEditSheetUI(); };
   document.getElementById("overlay").addEventListener("click",(e)=>{ if(e.target.id==="overlay"){ closeEditSheetUI(); }});
+  const assignedDesignerSelect = document.getElementById("assignedDesignerSelect");
+  if(assignedDesignerSelect){
+    assignedDesignerSelect.onchange = (e)=>{
+      const preview = document.getElementById("assignedDesignerPreview");
+      const assigned = (state.designers||[]).find(d=>d.id===e.target.value);
+      if(!assigned){ preview.innerHTML = ""; return; }
+      const contactLine = [assigned.role, assigned.email, assigned.phone].filter(Boolean).join(" · ");
+      preview.innerHTML = `
+        <div style="display:flex;gap:14px;align-items:center;margin-top:6px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px;">
+          <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--brass);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:18px;">
+            ${assigned.photo ? `<img src="${escapeAttr(assigned.photo)}" style="width:100%;height:100%;object-fit:cover;">` : escapeHtml((assigned.name||"?").trim().charAt(0).toUpperCase())}
+          </div>
+          <div style="font-size:13px;">
+            <div style="font-weight:600;">${escapeHtml(assigned.name)}</div>
+            ${contactLine ? `<div style="color:var(--slate);">${escapeHtml(contactLine)}</div>` : ""}
+          </div>
+        </div>`;
+    };
+  }
+  const manageDesignersFromModalBtn = document.getElementById("manageDesignersFromModalBtn");
+  if(manageDesignersFromModalBtn){
+    manageDesignersFromModalBtn.onclick = ()=>{
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      popEditHistoryIfNeeded();
+      state.screen = "designers";
+      render();
+    };
+  }
   const openQuoteBtn = document.getElementById("openQuoteBtn");
   if(openQuoteBtn){
     openQuoteBtn.onclick = async ()=>{
@@ -3148,6 +3533,28 @@ function renderModal(){
       render();
     };
   }
+  const openQuoteBtnForFinal = document.getElementById("openQuoteBtnForFinal");
+  if(openQuoteBtnForFinal){
+    openQuoteBtnForFinal.onclick = async ()=>{
+      const projectId = openQuoteBtnForFinal.dataset.id;
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      popEditHistoryIfNeeded();
+      state.screen = "quotation";
+      state.quotationProjectId = projectId;
+      state.quotation = null;
+      render();
+      await loadQuotation(projectId);
+    };
+  }
+  const downloadProductionAgreementBtn = document.getElementById("downloadProductionAgreementBtn");
+  if(downloadProductionAgreementBtn){
+    downloadProductionAgreementBtn.onclick = ()=>{
+      const project = state.projects.find(x=>x.id===downloadProductionAgreementBtn.dataset.id);
+      if(project) generateProductionAgreementPdf(project);
+    };
+  }
+  attachProductionPaymentVerificationHandlers();
   const downloadAgreementBtn = document.getElementById("downloadAgreementBtn");
   if(downloadAgreementBtn){
     downloadAgreementBtn.onclick = ()=>{
@@ -3209,8 +3616,19 @@ function renderModal(){
       }
     };
   }
+  // Same Enter-key guard as the designer form: this form has many text
+  // fields across several sections, so an accidental Enter shouldn't save
+  // and close the project mid-edit. Textareas and the submit button itself
+  // keep their normal behavior.
+  document.getElementById("projectForm").addEventListener("keydown",(e)=>{
+    if(e.key === "Enter" && e.target.tagName === "INPUT" && !["submit","button","checkbox","radio","file"].includes(e.target.type)){
+      e.preventDefault();
+    }
+  });
   document.getElementById("projectForm").onsubmit = async (e)=>{
     e.preventDefault();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if(submitBtn && submitBtn.disabled) return; // already processing this submit — ignore a rapid repeat click/Enter
     const fd = new FormData(e.target);
     const clientName = (fd.get("clientName")||"").trim();
     const projectName = (fd.get("projectName")||"").trim();
@@ -3223,6 +3641,7 @@ function renderModal(){
       return;
     }
     errEl.style.display = "none";
+    if(submitBtn) submitBtn.disabled = true;
     const newStatus = fd.get("status");
     const movedBackToDiscussion = newStatus === "In Discussion" && p.status !== "In Discussion";
     const designDevIdx = STAGES.indexOf("Design Development");
@@ -3239,6 +3658,7 @@ function renderModal(){
       contractSignedDate: fd.has("contractSignedDate") ? fd.get("contractSignedDate") : p.contractSignedDate,
       contractNotes: fd.has("contractNotes") ? fd.get("contractNotes") : p.contractNotes,
       designAgreementValue: fd.has("designAgreementValue") ? fd.get("designAgreementValue") : p.designAgreementValue,
+      productionPaymentAmount: fd.has("productionPaymentAmount") ? fd.get("productionPaymentAmount") : p.productionPaymentAmount,
       designAgreementSignedDate: movedBackToDiscussion ? "" : (fd.has("designAgreementSignedDate") ? fd.get("designAgreementSignedDate") : p.designAgreementSignedDate),
       designAgreementNotes: fd.has("designAgreementNotes") ? fd.get("designAgreementNotes") : p.designAgreementNotes,
       designAgreementPaymentInfo: fd.has("designAgreementPaymentInfo") ? fd.get("designAgreementPaymentInfo") : p.designAgreementPaymentInfo,
@@ -3280,13 +3700,12 @@ function renderModal(){
       const i = state.projects.findIndex(x=>x.id===p.id);
       state.projects[i] = updated;
     }
-    const savedProjectId = updated.id;
     state.editing = null;
     document.getElementById("overlay").remove();
     popEditHistoryIfNeeded();
     render();
     try{
-      await saveProjects(savedProjectId);
+      await saveProjects();
     }catch(err){
       console.error(err);
       showToast("Could not save changes. Please try again.", true);
@@ -3298,7 +3717,13 @@ function attachStudioHandlers(){
   const s = document.getElementById("searchInput");
   const f = document.getElementById("filterSelect");
   const n = document.getElementById("newProjectBtn");
-  if(s) s.oninput = (e)=>{ state.search = e.target.value; render(); s.focus(); s.setSelectionRange(s.value.length,s.value.length); };
+  if(s) s.oninput = (e)=>{
+    state.search = e.target.value;
+    const selStart = e.target.selectionStart, selEnd = e.target.selectionEnd;
+    render();
+    const s2 = document.getElementById("searchInput");
+    if(s2){ s2.focus(); try{ s2.setSelectionRange(selStart,selEnd); }catch(err){} }
+  };
   if(f) f.onchange = (e)=>{ state.filter = e.target.value; render(); };
   if(n) n.onclick = ()=>{ state.editing = "new"; render(); pushEditHistory(); };
   const dp = document.getElementById("designerProfilesBtn");
@@ -3329,6 +3754,7 @@ function attachStudioHandlers(){
       e.stopPropagation();
       state.confirmDelete = b.dataset.id;
       renderConfirm();
+      pushEditHistory();
     });
   });
 }
@@ -3351,15 +3777,16 @@ function renderConfirm(){
     </div>
   </div>`;
   document.body.insertAdjacentHTML("beforeend", html);
-  document.getElementById("confirmCancel").onclick = ()=>{ state.confirmDelete=null; document.getElementById("confirmOverlay").remove(); };
-  document.getElementById("confirmOverlay").addEventListener("click",(e)=>{ if(e.target.id==="confirmOverlay"){ state.confirmDelete=null; e.target.remove(); }});
+  document.getElementById("confirmCancel").onclick = ()=>{ state.confirmDelete=null; document.getElementById("confirmOverlay").remove(); popEditHistoryIfNeeded(); };
+  document.getElementById("confirmOverlay").addEventListener("click",(e)=>{ if(e.target.id==="confirmOverlay"){ state.confirmDelete=null; e.target.remove(); popEditHistoryIfNeeded(); }});
   document.getElementById("confirmDeleteBtn").onclick = async ()=>{
     const id = state.confirmDelete;
     state.projects = state.projects.filter(p=>p.id!==id);
     state.confirmDelete = null;
     document.getElementById("confirmOverlay").remove();
     render();
-    try{ await saveProjects(undefined, [id]); }catch(err){ console.error(err); showToast("Could not save changes. Please try again.", true); }
+    popEditHistoryIfNeeded();
+    try{ await saveProjects([id]); }catch(err){ console.error(err); showToast("Could not save changes. Please try again.", true); }
   };
 }
 
@@ -3377,9 +3804,11 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
   }
   if(state.screen === "designers"){
     state.screen = "main";
+    const designerModalWasOpen = state.editingDesigner !== null || state.confirmDeleteDesigner !== null;
     state.editingDesigner = null;
     state.confirmDeleteDesigner = null;
     render();
+    if(designerModalWasOpen) popEditHistoryIfNeeded();
     return;
   }
   if(state.screen === "presets"){
@@ -3418,6 +3847,7 @@ async function refreshProjectsIfSafe(){
     // UTR/screenshot shows up — and becomes verifiable — right away
     // instead of only after closing and reopening the project.
     await refreshPaymentVerificationIfEditing();
+    await refreshProductionPaymentVerificationIfEditing();
     await refreshSiteMeasurementIfEditing();
     return;
   }
