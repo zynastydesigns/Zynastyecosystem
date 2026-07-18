@@ -1897,9 +1897,21 @@ function attachClientHandlers(){
   // ---- Step-based progression handlers: Site Measurement → 3D Renders → Material Selection ----
   // Each caller passes only the fields it just changed on p, so the RPC's
   // allow-list stays the source of truth for what a client can touch.
+  //
+  // state.pendingSaves counts saves currently in flight. isRefreshUnsafe()
+  // checks this so the background poll/focus refresh never fetches while a
+  // save is still landing — otherwise it can win the race and overwrite the
+  // just-set local value with the pre-save server copy, which is what made
+  // "Next" buttons (e.g. Material Selection → Production) appear to snap
+  // back to the previous step.
   async function saveClientProject(p, updates){
-    const ok = await updateClientProject(p.accessCode, updates);
-    if(!ok) console.error("Could not save progress");
+    state.pendingSaves = (state.pendingSaves || 0) + 1;
+    try{
+      const ok = await updateClientProject(p.accessCode, updates);
+      if(!ok) console.error("Could not save progress");
+    }finally{
+      state.pendingSaves = Math.max(0, (state.pendingSaves || 1) - 1);
+    }
   }
 
   const siteVisitForm = document.getElementById("siteVisitForm");
@@ -2084,6 +2096,7 @@ function attachClientHandlers(){
 // re-check whenever this tab becomes visible or focused again.
 function isRefreshUnsafe(){
   if(!state.clientResult) return false;
+  if(state.pendingSaves) return true;
   const p = state.clientResult;
   const step = state.onboardingStep;
   if(p.status === "Lost") return true;
