@@ -3699,15 +3699,60 @@ function renderModal(){
     }
     errEl.style.display = "none";
     if(submitBtn) submitBtn.disabled = true;
+    // Re-fetch the freshest copy of this project to use as the basis for
+    // every field the form doesn't explicitly change. This tab's in-memory
+    // copy of `p` can be stale (the modal may have been open a while) — if
+    // the client submitted a payment, studio synced a lead, or Design
+    // Studio files were uploaded in the meantime, basing the save on the
+    // fresh copy instead of the stale local one keeps those changes intact.
+    let basis = p;
+    if(!isNew){
+      try{
+        const res = await window.storage.get(STORAGE_KEY, true);
+        const freshList = res && res.value ? JSON.parse(res.value) : null;
+        const fresh = freshList && freshList.find(x=>x.id===p.id);
+        if(fresh) basis = fresh;
+      }catch(err){ /* fall back to the in-memory copy if this fetch fails */ }
+    }
     const newStatus = fd.get("status");
-    const movedBackToDiscussion = newStatus === "In Discussion" && p.status !== "In Discussion";
+    const movedBackToDiscussion = newStatus === "In Discussion" && basis.status !== "In Discussion";
     const designDevIdx = STAGES.indexOf("Design Development");
     const inProgressIdx = STAGES.indexOf("In Progress");
-    const movedOutOfDesignPhase = STAGES.indexOf(p.status) >= designDevIdx && STAGES.indexOf(newStatus) < designDevIdx;
-    const enteredProductionPhase = STAGES.indexOf(newStatus) >= inProgressIdx && STAGES.indexOf(p.status) < inProgressIdx;
+    const installIdx = STAGES.indexOf("Install & Styling");
+    const movedOutOfDesignPhase = STAGES.indexOf(basis.status) >= designDevIdx && STAGES.indexOf(newStatus) < designDevIdx;
+    const enteredProductionPhase = STAGES.indexOf(newStatus) >= inProgressIdx && STAGES.indexOf(basis.status) < inProgressIdx;
+    // Phase-sequence validation (BUG-010): moving forward should generally
+    // go through each phase rather than skip ahead, and shouldn't enter
+    // Production or Install & Styling/Completed before the corresponding
+    // agreement is accepted and payment verified. This warns and lets
+    // studio confirm an intentional override rather than hard-blocking —
+    // consistent with the other business-rule checks in this form.
+    if(newStatus !== "Lost" && basis.status !== "Lost"){
+      const oldIdx = STAGES.indexOf(basis.status);
+      const newIdx = STAGES.indexOf(newStatus);
+      if(newIdx > oldIdx + 1){
+        const skipped = STAGES.slice(oldIdx+1, newIdx).join(", ");
+        if(!confirm(`This skips over: ${skipped}. Move straight to "${newStatus}" anyway?`)){
+          if(submitBtn) submitBtn.disabled = false;
+          return;
+        }
+      }
+      if(newIdx >= inProgressIdx && oldIdx < inProgressIdx && (!basis.agreementAccepted || basis.paymentStatus !== "verified")){
+        if(!confirm(`The Design Agreement and/or its payment haven't been completed yet. Move to "${newStatus}" anyway?`)){
+          if(submitBtn) submitBtn.disabled = false;
+          return;
+        }
+      }
+      if(newIdx >= installIdx && oldIdx < installIdx && (!basis.productionAgreementAccepted || basis.productionPaymentStatus !== "verified")){
+        if(!confirm(`The Production Agreement and/or Production payment haven't been completed yet. Move to "${newStatus}" anyway?`)){
+          if(submitBtn) submitBtn.disabled = false;
+          return;
+        }
+      }
+    }
     const resetDesignWizard = movedBackToDiscussion || movedOutOfDesignPhase;
     const updated = {
-      ...p,
+      ...basis,
       id: p.id,
       clientName: clientName, clientSalutation: fd.get("clientSalutation"), clientEmail: clientEmail, clientPhone: clientPhone,
       projectName: projectName, projectType: fd.get("projectType"),
@@ -3715,30 +3760,30 @@ function renderModal(){
       targetCompletion: (fd.get("targetCompletion")||"").trim(), details: (fd.get("details")||"").trim(),
       status: newStatus, accessCode: fd.get("accessCode") || genUniqueCode(projectName),
       contractValue: contractValue,
-      contractSignedDate: fd.has("contractSignedDate") ? fd.get("contractSignedDate") : p.contractSignedDate,
-      contractNotes: (fd.has("contractNotes") ? fd.get("contractNotes") : (p.contractNotes||"")).toString().trim(),
+      contractSignedDate: fd.has("contractSignedDate") ? fd.get("contractSignedDate") : basis.contractSignedDate,
+      contractNotes: (fd.has("contractNotes") ? fd.get("contractNotes") : (basis.contractNotes||"")).toString().trim(),
       designAgreementValue: designAgreementValue,
-      productionPaymentAmount: fd.has("productionPaymentAmount") ? fd.get("productionPaymentAmount") : p.productionPaymentAmount,
-      designAgreementSignedDate: movedBackToDiscussion ? "" : (fd.has("designAgreementSignedDate") ? fd.get("designAgreementSignedDate") : p.designAgreementSignedDate),
-      designAgreementNotes: (fd.has("designAgreementNotes") ? fd.get("designAgreementNotes") : (p.designAgreementNotes||"")).toString().trim(),
-      designAgreementPaymentInfo: (fd.has("designAgreementPaymentInfo") ? fd.get("designAgreementPaymentInfo") : (p.designAgreementPaymentInfo||"")).toString().trim(),
-      assignedDesignerId: fd.has("assignedDesignerId") ? fd.get("assignedDesignerId") : (p.assignedDesignerId || ""),
-      designWelcomeSeen: resetDesignWizard ? false : (p.designWelcomeSeen || false),
-      designerIntroSeen: resetDesignWizard ? false : (p.designerIntroSeen || false),
-      agreementAccepted: movedBackToDiscussion ? false : p.agreementAccepted,
-      agreementAcceptedAt: movedBackToDiscussion ? "" : p.agreementAcceptedAt,
-      quotationAccepted: movedBackToDiscussion ? false : p.quotationAccepted,
-      quotationAcceptedAt: movedBackToDiscussion ? "" : p.quotationAcceptedAt,
-      paymentStatus: movedBackToDiscussion ? "not_submitted" : p.paymentStatus,
-      paymentReferenceNote: movedBackToDiscussion ? "" : p.paymentReferenceNote,
-      paymentSubmittedAt: movedBackToDiscussion ? "" : p.paymentSubmittedAt,
-      paymentVerifiedAt: movedBackToDiscussion ? "" : p.paymentVerifiedAt,
-      paymentRejectionNote: movedBackToDiscussion ? "" : p.paymentRejectionNote,
+      productionPaymentAmount: fd.has("productionPaymentAmount") ? fd.get("productionPaymentAmount") : basis.productionPaymentAmount,
+      designAgreementSignedDate: movedBackToDiscussion ? "" : (fd.has("designAgreementSignedDate") ? fd.get("designAgreementSignedDate") : basis.designAgreementSignedDate),
+      designAgreementNotes: (fd.has("designAgreementNotes") ? fd.get("designAgreementNotes") : (basis.designAgreementNotes||"")).toString().trim(),
+      designAgreementPaymentInfo: (fd.has("designAgreementPaymentInfo") ? fd.get("designAgreementPaymentInfo") : (basis.designAgreementPaymentInfo||"")).toString().trim(),
+      assignedDesignerId: fd.has("assignedDesignerId") ? fd.get("assignedDesignerId") : (basis.assignedDesignerId || ""),
+      designWelcomeSeen: resetDesignWizard ? false : (basis.designWelcomeSeen || false),
+      designerIntroSeen: resetDesignWizard ? false : (basis.designerIntroSeen || false),
+      agreementAccepted: movedBackToDiscussion ? false : basis.agreementAccepted,
+      agreementAcceptedAt: movedBackToDiscussion ? "" : basis.agreementAcceptedAt,
+      quotationAccepted: movedBackToDiscussion ? false : basis.quotationAccepted,
+      quotationAcceptedAt: movedBackToDiscussion ? "" : basis.quotationAcceptedAt,
+      paymentStatus: movedBackToDiscussion ? "not_submitted" : basis.paymentStatus,
+      paymentReferenceNote: movedBackToDiscussion ? "" : basis.paymentReferenceNote,
+      paymentSubmittedAt: movedBackToDiscussion ? "" : basis.paymentSubmittedAt,
+      paymentVerifiedAt: movedBackToDiscussion ? "" : basis.paymentVerifiedAt,
+      paymentRejectionNote: movedBackToDiscussion ? "" : basis.paymentRejectionNote,
       welcomeMessage: (fd.get("welcomeMessage")||"").trim(),
-      quotationSavedAt: movedBackToDiscussion ? "" : (p.quotationSavedAt || ""),
-      lostAt: newStatus === "Lost" ? (p.lostAt || new Date().toISOString()) : "",
-      lostReason: newStatus === "Lost" ? (fd.has("lostReason") ? fd.get("lostReason") : (p.lostReason||"")) : "",
-      preLostStatus: newStatus === "Lost" ? (p.status !== "Lost" ? p.status : (p.preLostStatus||"")) : "",
+      quotationSavedAt: movedBackToDiscussion ? "" : (basis.quotationSavedAt || ""),
+      lostAt: newStatus === "Lost" ? (basis.lostAt || new Date().toISOString()) : "",
+      lostReason: newStatus === "Lost" ? (fd.has("lostReason") ? fd.get("lostReason") : (basis.lostReason||"")) : "",
+      preLostStatus: newStatus === "Lost" ? (basis.status !== "Lost" ? basis.status : (basis.preLostStatus||"")) : "",
       // Keep the client's Design Phase wizard position in sync whenever
       // studio changes the project's phase — not just moving backward
       // (BUG-001), but also moving forward into Production: the client is
@@ -3748,11 +3793,11 @@ function renderModal(){
       // This only ever touches the step pointer: booking dates/times,
       // payment history, KYC, and signed agreements are all preserved
       // above via the spread and are untouched.
-      progressStep: resetDesignWizard ? "" : (enteredProductionPhase ? "production" : p.progressStep)
+      progressStep: resetDesignWizard ? "" : (enteredProductionPhase ? "production" : basis.progressStep)
     };
     if(isNew){ state.projects.push(updated); } else {
       const i = state.projects.findIndex(x=>x.id===p.id);
-      state.projects[i] = updated;
+      if(i === -1) state.projects.push(updated); else state.projects[i] = updated;
     }
     state.editing = null;
     document.getElementById("overlay").remove();
