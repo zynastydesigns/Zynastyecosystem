@@ -2154,6 +2154,7 @@ function attachQuotationHandlers(){
       // client portal already reflects the saved quotation.
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(project){
+        await refreshProjectFields(project);
         project.quotationSavedAt = new Date().toISOString();
         logActivity(project, "document", "Quotation saved");
         await saveProjects();
@@ -2180,6 +2181,7 @@ function attachQuotationHandlers(){
       const t = computeQuoteTotals(state.quotation);
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
+      await refreshProjectFields(project);
       project.initialQuotation = Math.round(t.grandTotal);
       logActivity(project, "document", `Initial Quotation set to ${fmtMoney(project.initialQuotation)}`);
       await saveProjects();
@@ -2196,6 +2198,7 @@ function attachQuotationHandlers(){
       const t = computeQuoteTotals(state.quotation);
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
+      await refreshProjectFields(project);
       const wasAlreadySet = !!project.finalQuotation;
       project.finalQuotation = Math.round(t.grandTotal);
       logActivity(project, "document", `Final Quotation ${wasAlreadySet ? "updated" : "set"} to ${fmtMoney(project.finalQuotation)}`);
@@ -2788,10 +2791,11 @@ function attachSiteMeasurementHandlers(){
     confirmBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===confirmBtn.dataset.id);
       if(!project) return;
-      project.siteVisitConfirmed = true;
-      project.siteVisitConfirmedAt = new Date().toISOString();
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.siteVisitConfirmed = true;
+      project.siteVisitConfirmedAt = new Date().toISOString();
       await saveProjects();
       refreshSiteMeasurementPanel(project);
     };
@@ -2801,10 +2805,11 @@ function attachSiteMeasurementHandlers(){
     unconfirmBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===unconfirmBtn.dataset.id);
       if(!project) return;
-      project.siteVisitConfirmed = false;
-      project.siteVisitConfirmedAt = "";
       unconfirmBtn.disabled = true;
       unconfirmBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.siteVisitConfirmed = false;
+      project.siteVisitConfirmedAt = "";
       await saveProjects();
       refreshSiteMeasurementPanel(project);
     };
@@ -2814,10 +2819,11 @@ function attachSiteMeasurementHandlers(){
     completeBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===completeBtn.dataset.id);
       if(!project) return;
-      project.siteMeasurementCompleted = true;
-      project.siteMeasurementCompletedAt = new Date().toISOString();
       completeBtn.disabled = true;
       completeBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.siteMeasurementCompleted = true;
+      project.siteMeasurementCompletedAt = new Date().toISOString();
       await saveProjects();
       refreshSiteMeasurementPanel(project);
     };
@@ -2827,10 +2833,11 @@ function attachSiteMeasurementHandlers(){
     undoBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===undoBtn.dataset.id);
       if(!project) return;
-      project.siteMeasurementCompleted = false;
-      project.siteMeasurementCompletedAt = "";
       undoBtn.disabled = true;
       undoBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.siteMeasurementCompleted = false;
+      project.siteMeasurementCompletedAt = "";
       await saveProjects();
       refreshSiteMeasurementPanel(project);
     };
@@ -3019,12 +3026,13 @@ function attachPaymentVerificationHandlers(){
     verifyPaymentBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===verifyPaymentBtn.dataset.id);
       if(!project) return;
+      verifyPaymentBtn.disabled = true;
+      verifyPaymentBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
       project.paymentStatus = "verified";
       project.paymentVerifiedAt = new Date().toISOString();
       project.paymentRejectionNote = "";
       logActivity(project, "payment", "Design payment verified");
-      verifyPaymentBtn.disabled = true;
-      verifyPaymentBtn.textContent = "Saving…";
       await saveProjects();
       refreshPaymentVerificationPanel(project);
     };
@@ -3035,12 +3043,14 @@ function attachPaymentVerificationHandlers(){
       const project = state.projects.find(x=>x.id===rejectPaymentBtn.dataset.id);
       if(!project) return;
       const noteInput = document.getElementById("paymentRejectionNoteInput");
-      project.paymentStatus = "rejected";
-      project.paymentVerifiedAt = new Date().toISOString();
-      project.paymentRejectionNote = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
-      logActivity(project, "payment", "Design payment rejected: " + project.paymentRejectionNote);
+      const noteValue = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
       rejectPaymentBtn.disabled = true;
       rejectPaymentBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.paymentStatus = "rejected";
+      project.paymentVerifiedAt = new Date().toISOString();
+      project.paymentRejectionNote = noteValue;
+      logActivity(project, "payment", "Design payment rejected: " + project.paymentRejectionNote);
       await saveProjects();
       refreshPaymentVerificationPanel(project);
     };
@@ -3101,12 +3111,13 @@ function attachProductionPaymentVerificationHandlers(){
     verifyProductionPaymentBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===verifyProductionPaymentBtn.dataset.id);
       if(!project) return;
+      verifyProductionPaymentBtn.disabled = true;
+      verifyProductionPaymentBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
       project.productionPaymentStatus = "verified";
       project.productionPaymentVerifiedAt = new Date().toISOString();
       project.productionPaymentRejectionNote = "";
       logActivity(project, "payment", "Production payment verified");
-      verifyProductionPaymentBtn.disabled = true;
-      verifyProductionPaymentBtn.textContent = "Saving…";
       await saveProjects();
       refreshProductionPaymentVerificationPanel(project);
     };
@@ -3117,12 +3128,14 @@ function attachProductionPaymentVerificationHandlers(){
       const project = state.projects.find(x=>x.id===rejectProductionPaymentBtn.dataset.id);
       if(!project) return;
       const noteInput = document.getElementById("productionPaymentRejectionNoteInput");
-      project.productionPaymentStatus = "rejected";
-      project.productionPaymentVerifiedAt = new Date().toISOString();
-      project.productionPaymentRejectionNote = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
-      logActivity(project, "payment", "Production payment rejected: " + project.productionPaymentRejectionNote);
+      const noteValue = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
       rejectProductionPaymentBtn.disabled = true;
       rejectProductionPaymentBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.productionPaymentStatus = "rejected";
+      project.productionPaymentVerifiedAt = new Date().toISOString();
+      project.productionPaymentRejectionNote = noteValue;
+      logActivity(project, "payment", "Production payment rejected: " + project.productionPaymentRejectionNote);
       await saveProjects();
       refreshProductionPaymentVerificationPanel(project);
     };
