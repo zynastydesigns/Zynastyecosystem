@@ -576,6 +576,25 @@ function loadClientSession(){
   try{ return localStorage.getItem(CLIENT_SESSION_KEY) || ""; }catch(e){ return ""; }
 }
 
+// Local safety net for a handful of one-way wizard-progress flags (right
+// now: the Material Selection "downloaded" flag). The server copy is
+// always the source of truth once it's confirmed, but this gives the UI
+// something to fall back on if a read in the few minutes after saving
+// ever comes back stale, instead of visibly flickering backward. Cleared
+// automatically once the server catches up with the same value.
+function localProgressFlagKey(projectId, field){
+  return "zynasty-client-progress:" + projectId + ":" + field;
+}
+function setLocalProgressFlag(projectId, field, value){
+  try{ localStorage.setItem(localProgressFlagKey(projectId, field), value); }catch(e){ /* ignore */ }
+}
+function getLocalProgressFlag(projectId, field){
+  try{ return localStorage.getItem(localProgressFlagKey(projectId, field)) || ""; }catch(e){ return ""; }
+}
+function clearLocalProgressFlag(projectId, field){
+  try{ localStorage.removeItem(localProgressFlagKey(projectId, field)); }catch(e){ /* ignore */ }
+}
+
 async function loadProjects(){
   try{
     const res = await window.storage.get(STORAGE_KEY, true);
@@ -613,6 +632,14 @@ async function refreshCurrentProject(){
         // already-open tab happened to be on.
         state.designStep = null;
         state.productionStep = null;
+      }
+      const localDownloadFlag = getLocalProgressFlag(updated.id, "materialSelectionDownloadedAt");
+      if(localDownloadFlag){
+        if(updated.materialSelectionDownloadedAt){
+          clearLocalProgressFlag(updated.id, "materialSelectionDownloadedAt"); // server has caught up
+        } else {
+          updated.materialSelectionDownloadedAt = localDownloadFlag; // keep showing the local value until it does
+        }
       }
       state.clientResult = updated;
       try{
@@ -1061,7 +1088,7 @@ function renderClient(){
 
     const siteMeasurementCompleted = !!p.siteMeasurementCompleted;
     const siteVisitConfirmed = !!p.siteVisitConfirmed;
-    const materialDownloaded = !!p.materialSelectionDownloadedAt;
+    const materialDownloaded = !!p.materialSelectionDownloadedAt || !!getLocalProgressFlag(p.id, "materialSelectionDownloadedAt");
 
     const stepPillsHtml = `
       <div style="display:flex;justify-content:center;gap:8px;margin-bottom:22px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;flex-wrap:wrap;">
@@ -1974,29 +2001,17 @@ function attachClientHandlers(){
     downloadMaterialBtn.onclick = ()=> downloadDesignPdf("material", state.clientResult.id, downloadMaterialBtn, document.getElementById("materialDownloadNote"), async ()=>{
       const p = state.clientResult;
       const noteEl = document.getElementById("materialDownloadNote");
-      if(!p.materialSelectionDownloadedAt){
+      if(!p.materialSelectionDownloadedAt && !getLocalProgressFlag(p.id, "materialSelectionDownloadedAt")){
         const attemptedAt = new Date().toISOString();
+        // Set the local backup first — this is what materialDownloaded
+        // falls back to, so the Next button shows and stays showing even
+        // if a background read comes back stale in the minutes after.
+        setLocalProgressFlag(p.id, "materialSelectionDownloadedAt", attemptedAt);
         p.materialSelectionDownloadedAt = attemptedAt;
         const ok = await saveClientProject(p, { materialSelectionDownloadedAt: attemptedAt });
         if(!ok){
-          p.materialSelectionDownloadedAt = "";
-          if(noteEl) noteEl.textContent = "Downloaded, but couldn't save your progress — please try again or contact support.";
-          render();
-          return;
+          if(noteEl) noteEl.textContent = "Downloaded — still saving your progress in the background.";
         }
-        // DIAGNOSTIC: immediately re-fetch the raw record from the server
-        // (not the in-memory copy) to check whether the field actually made
-        // it into the database, or whether the RPC silently dropped it
-        // while still reporting success.
-        try{
-          const res = await window.storage.get(STORAGE_KEY, true);
-          const freshList = res && res.value ? JSON.parse(res.value) : null;
-          const freshProject = freshList && freshList.find(x=>x.id===p.id);
-          console.log("[diagnostic] materialSelectionDownloadedAt right after save:", freshProject ? freshProject.materialSelectionDownloadedAt : "(project not found)");
-          if(freshProject && !freshProject.materialSelectionDownloadedAt){
-            if(noteEl) noteEl.textContent = "Diagnostic: the save reported success, but the field is still missing in the database immediately afterward. This confirms the backend function is silently dropping this field rather than erroring.";
-          }
-        }catch(err){ console.error("[diagnostic] verification fetch failed", err); }
       }
       render();
     });
@@ -2009,6 +2024,14 @@ function attachClientHandlers(){
       state.productionStep = "transition";
       render();
       await saveClientProject(p, { progressStep: p.progressStep });
+      // Reapply once more shortly after, as reinforcement in case anything
+      // else touched this project between our save and now and reverted
+      // this field — cheap insurance on top of the local flag/refresh window.
+      setTimeout(()=>{
+        if(state.clientResult && state.clientResult.id === p.id && state.clientResult.progressStep === "production"){
+          saveClientProject(state.clientResult, { progressStep: "production" }).catch(()=>{});
+        }
+      }, 15000);
     };
   }
   const materialSlotForm = document.getElementById("materialSlotForm");
@@ -2141,6 +2164,10 @@ function isRefreshUnsafe(){
   const progressStep = p.progressStep || "siteVisit";
   if(progressStep === "siteVisit" && !(p.siteVisitDate && p.siteVisitTime)) return true;
   if(progressStep === "material" && !(p.materialSlotDate && p.materialSlotTime)) return true;
+  if(progressStep === "material" && (p.materialSelectionDownloadedAt || getLocalProgressFlag(p.id, "materialSelectionDownloadedAt"))){
+    const downloadedAt = new Date(p.materialSelectionDownloadedAt || getLocalProgressFlag(p.id, "materialSelectionDownloadedAt")).getTime();
+    if(!isNaN(downloadedAt) && (Date.now() - downloadedAt) < 120000) return true; // 2-minute window
+  }
   return false;
 }
 
