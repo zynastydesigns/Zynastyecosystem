@@ -1973,13 +1973,24 @@ function attachClientHandlers(){
         p.materialSelectionDownloadedAt = attemptedAt;
         const ok = await saveClientProject(p, { materialSelectionDownloadedAt: attemptedAt });
         if(!ok){
-          // The save didn't stick server-side — don't show the Next button
-          // as if it worked, since it would just revert on the next refresh.
           p.materialSelectionDownloadedAt = "";
           if(noteEl) noteEl.textContent = "Downloaded, but couldn't save your progress — please try again or contact support.";
           render();
           return;
         }
+        // DIAGNOSTIC: immediately re-fetch the raw record from the server
+        // (not the in-memory copy) to check whether the field actually made
+        // it into the database, or whether the RPC silently dropped it
+        // while still reporting success.
+        try{
+          const res = await window.storage.get(STORAGE_KEY, true);
+          const freshList = res && res.value ? JSON.parse(res.value) : null;
+          const freshProject = freshList && freshList.find(x=>x.id===p.id);
+          console.log("[diagnostic] materialSelectionDownloadedAt right after save:", freshProject ? freshProject.materialSelectionDownloadedAt : "(project not found)");
+          if(freshProject && !freshProject.materialSelectionDownloadedAt){
+            if(noteEl) noteEl.textContent = "Diagnostic: the save reported success, but the field is still missing in the database immediately afterward. This confirms the backend function is silently dropping this field rather than erroring.";
+          }
+        }catch(err){ console.error("[diagnostic] verification fetch failed", err); }
       }
       render();
     });
