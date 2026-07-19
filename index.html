@@ -2114,6 +2114,7 @@ function isRefreshUnsafe(){
   const progressStep = p.progressStep || "siteVisit";
   if(progressStep === "siteVisit" && !(p.siteVisitDate && p.siteVisitTime)) return true;
   if(progressStep === "material" && !(p.materialSlotDate && p.materialSlotTime)) return true;
+  if(progressStep === "material" && p.materialSelectionDownloadedAt) return true;
   return false;
 }
 

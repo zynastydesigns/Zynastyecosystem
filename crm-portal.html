@@ -278,7 +278,7 @@
   .who-email-link{cursor:pointer;transition:color .15s;}
   .who-email-link:hover{color:#fff;}
 
-  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:32px;}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:32px;}
   .stat-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:20px;box-shadow:0 8px 20px rgba(27,36,56,0.06);}
   .stat-card.is-clickable{cursor:pointer;transition:box-shadow .15s ease, transform .15s ease, border-color .15s ease;}
   .stat-card.is-clickable:hover{box-shadow:0 12px 28px rgba(27,36,56,0.12);border-color:var(--gold);transform:translateY(-1px);}
@@ -559,6 +559,16 @@
           <div class="value mono" id="stat-pipeline">—</div>
           <div class="delta">open, non-lost projects</div>
         </div>
+        <div class="stat-card">
+          <div class="label">Pending Payments</div>
+          <div class="value mono" id="stat-pending-payments">—</div>
+          <div class="delta">awaiting verification</div>
+        </div>
+        <div class="stat-card is-clickable" id="card-completed" role="button" tabindex="0">
+          <div class="label">Completed Projects</div>
+          <div class="value mono" id="stat-completed">—</div>
+          <div class="delta">marked Completed</div>
+        </div>
       </div>
 
       <div class="panel">
@@ -810,6 +820,7 @@
   const cardActiveLeads = document.getElementById('card-active-leads');
   const cardFreshLeads = document.getElementById('card-fresh-leads');
   const cardInProgress = document.getElementById('card-in-progress');
+  const cardCompleted = document.getElementById('card-completed');
   const openStudioPortalBtn = document.getElementById('open-studio-portal-btn');
   let currentLeads = [];
   let currentProjects = [];
@@ -1045,6 +1056,8 @@
   cardFreshLeads.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); goToLeadsStage('Fresh'); } });
   cardInProgress.addEventListener('click', ()=> openStudioPortal('Design Development'));
   cardInProgress.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openStudioPortal('Design Development'); } });
+  cardCompleted.addEventListener('click', ()=> openStudioPortal('Completed'));
+  cardCompleted.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openStudioPortal('Completed'); } });
   openStudioPortalBtn.addEventListener('click', ()=> openStudioPortal('In Discussion'));
 
   // ---------- Zynasty CRM logo -> Overview, email/account preview -> Profile ----------
@@ -1898,7 +1911,13 @@
     const pipelineValue = projects
       .filter(p => p.status !== "Lost" && p.status !== "Completed")
       .reduce((sum, p) => sum + (Number(dealValueForProject(p)) || 0), 0);
-    return { active, inProgress, quotationsSent, pipelineValue };
+    // Any payment (design-fee or production-stage) sitting in "submitted"
+    // is awaiting studio's verification.
+    const pendingPayments = projects.filter(p =>
+      p.paymentStatus === "submitted" || p.productionPaymentStatus === "submitted"
+    ).length;
+    const completed = projects.filter(p => p.status === "Completed").length;
+    return { active, inProgress, quotationsSent, pipelineValue, pendingPayments, completed };
   }
 
   function computeFreshLeadsCount(leads){
@@ -1910,6 +1929,8 @@
     document.getElementById('stat-in-progress').textContent = stats.inProgress;
     document.getElementById('stat-quotations').textContent = stats.quotationsSent;
     document.getElementById('stat-pipeline').textContent = fmtMoney(stats.pipelineValue);
+    document.getElementById('stat-pending-payments').textContent = stats.pendingPayments;
+    document.getElementById('stat-completed').textContent = stats.completed;
   }
 
   function renderActivity(projects){

@@ -310,6 +310,10 @@
       </div>
     </div>
     <button class="btn ghost" id="headerBack" style="display:none;background:var(--ink-2);color:var(--paper);border-color:var(--line-dark);">← Back to Project</button>
+    <div style="position:relative;flex-shrink:0;">
+      <button class="btn ghost" id="notifBellBtn" type="button" style="position:relative;" aria-label="Notifications">🔔<span id="notifBadge" style="display:none;position:absolute;top:-6px;right:-6px;background:var(--clay);color:#fff;border-radius:999px;font-size:11px;line-height:1;padding:3px 6px;font-family:'IBM Plex Mono',monospace;"></span></button>
+      <div id="notifDropdown" style="display:none;position:absolute;right:0;top:calc(100% + 6px);width:340px;max-height:420px;overflow-y:auto;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:500;padding:10px;"></div>
+    </div>
     <a class="btn" id="headerCrmLink" href="crm-portal.html" style="flex-shrink:0;">← Back to CRM</a>
   </div>
 </header>
@@ -836,8 +840,33 @@ async function loadDesigners(){
   state.designersLoaded = true;
 }
 
-async function saveDesigners(){
+async function saveDesigners(excludeIds){
+  const excluded = new Set(excludeIds || []);
   try{
+    // Same reasoning as saveProjects(): re-fetch the freshest copy and merge
+    // it in for every designer OTHER than the one this tab is actively
+    // editing, so a concurrent edit to a different designer profile (by
+    // another studio session) isn't silently undone by this save. A
+    // designer just deleted by this same call (excludeIds) is never
+    // re-added from the fresh copy, or the delete could be silently undone.
+    const protectedId = state.editingDesigner && state.editingDesigner !== "new" ? state.editingDesigner : null;
+    try{
+      const res = await window.storage.get(DESIGNERS_KEY, true);
+      const freshList = res && res.value ? JSON.parse(res.value) : null;
+      if(freshList){
+        freshList.forEach(freshDesigner=>{
+          if(protectedId && freshDesigner.id === protectedId) return;
+          if(excluded.has(freshDesigner.id)) return;
+          const idx = state.designers.findIndex(x=>x.id===freshDesigner.id);
+          if(idx === -1) state.designers.push(freshDesigner);
+          else state.designers[idx] = freshDesigner;
+        });
+        state.designers = state.designers.filter(d=>
+          !excluded.has(d.id) && ((protectedId && d.id === protectedId) || freshList.some(f=>f.id===d.id))
+        );
+      }
+    }catch(e){ /* if the pre-save refresh fails, fall back to saving local state as-is */ }
+
     const result = await window.storage.set(DESIGNERS_KEY, JSON.stringify(state.designers), true);
     if(!result) showToast("Could not save changes. Please try again.", true);
     return result;
@@ -1290,6 +1319,16 @@ async function generateAndStoreFinalQuotationPdf(project, quotation){
 function newRoomId(){ return "dsroom_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
 function newImageId(){ return "dsimg_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
 
+// Appends a timestamped entry to a project's activity log (phase changes,
+// file uploads, agreement acceptance, payments, etc.). Capped to the most
+// recent 200 entries. Caller is responsible for saving afterward.
+function logActivity(project, type, message){
+  if(!project) return;
+  if(!Array.isArray(project.activityLog)) project.activityLog = [];
+  project.activityLog.push({ type, message, at: new Date().toISOString() });
+  if(project.activityLog.length > 200) project.activityLog = project.activityLog.slice(-200);
+}
+
 function ensureDesignStudio(p){
   if(!p.designStudio) p.designStudio = { threeD: { rooms: [] }, material: { rooms: [] } };
   if(!p.designStudio.threeD) p.designStudio.threeD = { rooms: [] };
@@ -1536,6 +1575,7 @@ function attachDesignStudioHandlers(){
       if(!confirm(`Delete "${room.name || "this room"}" and all its images? This cannot be undone.`)) return;
       const imageIds = room.images || [];
       data.rooms = data.rooms.filter(r=>r.id!==b.dataset.room);
+      logActivity(p, "file", `Deleted room "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       render();
       await saveProjects();
       await Promise.all(imageIds.map(id=>window.storage.delete("design-image:"+id, true).catch(()=>{})));
@@ -1550,6 +1590,7 @@ function attachDesignStudioHandlers(){
       const room = data.rooms.find(r=>r.id===inp.dataset.room);
       if(!room) return;
       showToast(`Uploading ${files.length} image${files.length>1?"s":""}…`);
+      let uploaded = 0;
       for(const file of files){
         try{
           const dataUrl = await compressImageFile(file);
@@ -1558,10 +1599,14 @@ function attachDesignStudioHandlers(){
           if(!result){ showToast("Could not upload an image. Please try again.", true); continue; }
           state.designStudioImages[imgId] = dataUrl;
           room.images.push(imgId);
+          uploaded++;
         }catch(err){
           console.error(err);
           showToast("Could not upload an image. Please try again.", true);
         }
+      }
+      if(uploaded > 0){
+        logActivity(p, "file", `Uploaded ${uploaded} image${uploaded>1?"s":""} to "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       }
       render();
       await saveProjects();
@@ -1574,6 +1619,7 @@ function attachDesignStudioHandlers(){
       const room = data.rooms.find(r=>r.id===b.dataset.room);
       if(!room) return;
       room.images = room.images.filter(id=>id!==b.dataset.img);
+      logActivity(p, "file", `Removed an image from "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       render();
       await saveProjects();
       try{ await window.storage.delete("design-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
@@ -1596,6 +1642,8 @@ function attachDesignStudioHandlers(){
       const key = "design-pdf:" + state.designStudioTab + ":" + p.id;
       const result = await window.storage.set(key, pdfDataUrl, true);
       if(!result) throw new Error("Storage rejected the PDF (it may be too large — try fewer or smaller images).");
+      logActivity(p, "document", `Published a new ${title} PDF`);
+      await saveProjects();
       showToast("PDF saved! The client can now download it from their portal.");
     }catch(err){
       console.error(err);
@@ -2080,6 +2128,7 @@ function attachQuotationHandlers(){
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(project){
         project.quotationSavedAt = new Date().toISOString();
+        logActivity(project, "document", "Quotation saved");
         await saveProjects();
       }
       try{
@@ -2105,6 +2154,7 @@ function attachQuotationHandlers(){
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
       project.initialQuotation = Math.round(t.grandTotal);
+      logActivity(project, "document", `Initial Quotation set to ${fmtMoney(project.initialQuotation)}`);
       await saveProjects();
       await saveQuotation();
       showToast("Initial Quotation updated to " + fmtMoney(project.initialQuotation) + ".", false);
@@ -2121,6 +2171,7 @@ function attachQuotationHandlers(){
       if(!project) return;
       const wasAlreadySet = !!project.finalQuotation;
       project.finalQuotation = Math.round(t.grandTotal);
+      logActivity(project, "document", `Final Quotation ${wasAlreadySet ? "updated" : "set"} to ${fmtMoney(project.finalQuotation)}`);
       useAsFinalQuoteBtn.disabled = true;
       const originalLabel = useAsFinalQuoteBtn.textContent;
       useAsFinalQuoteBtn.textContent = wasAlreadySet ? "Updating…" : "Saving…";
@@ -2460,6 +2511,46 @@ function renderRuler(stageIndex, large){
     </div>`;
 }
 
+// Gathers every project's activity log entries into one reverse-chronological
+// feed for the header notification bell (BUG-014). Notifications are derived
+// straight from the same activity log rather than a separate system, since
+// every event type they need (phase updates, new documents, agreement
+// requests, payment requests/confirmations, completion) is already recorded there.
+function getAllActivityEntries(){
+  const entries = [];
+  (state.projects||[]).forEach(p=>{
+    (p.activityLog||[]).forEach(entry=>{
+      entries.push({ type: entry.type, message: entry.message, at: entry.at, projectId: p.id, projectName: p.projectName || p.clientName || "Project" });
+    });
+  });
+  entries.sort((a,b)=> (b.at||"").localeCompare(a.at||""));
+  return entries;
+}
+
+function renderNotifications(){
+  const badge = document.getElementById("notifBadge");
+  const dropdown = document.getElementById("notifDropdown");
+  if(!badge || !dropdown) return;
+  const entries = getAllActivityEntries().slice(0, 50);
+  let lastSeen = "";
+  try{ lastSeen = localStorage.getItem("zynasty-studio-notif-lastseen") || ""; }catch(e){ /* ignore */ }
+  const unreadCount = entries.filter(e => (e.at||"") > lastSeen).length;
+  if(unreadCount > 0){
+    badge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+    badge.style.display = "block";
+  } else {
+    badge.style.display = "none";
+  }
+  dropdown.innerHTML = entries.length
+    ? entries.map(e=>`<div style="padding:8px 6px;border-bottom:1px solid var(--line);font-size:12.5px;">
+         <div style="font-weight:600;">${escapeHtml(e.projectName)}</div>
+         <div>${escapeHtml(e.message||"")}</div>
+         <div style="color:var(--slate);font-size:11px;margin-top:2px;">${escapeHtml(fmtDate((e.at||"").slice(0,10)))} ${escapeHtml((e.at||"").slice(11,16))}</div>
+       </div>`).join("")
+    : `<div style="padding:10px 6px;color:var(--slate);font-size:13px;">No notifications yet.</div>`;
+}
+
+
 function render(){
   const main = document.getElementById("main");
 
@@ -2490,6 +2581,7 @@ function render(){
     headerBack.style.display = "none";
     if(headerCrmLink) headerCrmLink.style.display = "inline-block";
   }
+  renderNotifications();
 
   if(!state.loaded){
     main.innerHTML = `<div class="empty">Loading projects…</div>`;
@@ -2881,6 +2973,7 @@ function attachPaymentVerificationHandlers(){
       project.paymentStatus = "verified";
       project.paymentVerifiedAt = new Date().toISOString();
       project.paymentRejectionNote = "";
+      logActivity(project, "payment", "Design payment verified");
       verifyPaymentBtn.disabled = true;
       verifyPaymentBtn.textContent = "Saving…";
       await saveProjects();
@@ -2896,6 +2989,7 @@ function attachPaymentVerificationHandlers(){
       project.paymentStatus = "rejected";
       project.paymentVerifiedAt = new Date().toISOString();
       project.paymentRejectionNote = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
+      logActivity(project, "payment", "Design payment rejected: " + project.paymentRejectionNote);
       rejectPaymentBtn.disabled = true;
       rejectPaymentBtn.textContent = "Saving…";
       await saveProjects();
@@ -2961,6 +3055,7 @@ function attachProductionPaymentVerificationHandlers(){
       project.productionPaymentStatus = "verified";
       project.productionPaymentVerifiedAt = new Date().toISOString();
       project.productionPaymentRejectionNote = "";
+      logActivity(project, "payment", "Production payment verified");
       verifyProductionPaymentBtn.disabled = true;
       verifyProductionPaymentBtn.textContent = "Saving…";
       await saveProjects();
@@ -2976,6 +3071,7 @@ function attachProductionPaymentVerificationHandlers(){
       project.productionPaymentStatus = "rejected";
       project.productionPaymentVerifiedAt = new Date().toISOString();
       project.productionPaymentRejectionNote = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
+      logActivity(project, "payment", "Production payment rejected: " + project.productionPaymentRejectionNote);
       rejectProductionPaymentBtn.disabled = true;
       rejectProductionPaymentBtn.textContent = "Saving…";
       await saveProjects();
@@ -3245,7 +3341,7 @@ function renderConfirmDeleteDesigner(){
     document.getElementById("confirmDesignerOverlay").remove();
     render();
     popEditHistoryIfNeeded();
-    await saveDesigners();
+    await saveDesigners([id]);
   };
 }
 
@@ -3498,6 +3594,19 @@ function renderModal(){
           <div class="field full"><label>Production Agreement Notes</label><textarea name="contractNotes" placeholder="Terms, deposit, payment schedule…">${escapeHtml(p.contractNotes)}</textarea></div>
         </div>` : ""}
 
+        ${!isNew ? `
+        <div class="section-label">Activity Log</div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;">
+            ${(p.activityLog && p.activityLog.length)
+              ? [...p.activityLog].reverse().slice(0, 30).map(entry=>`<div style="padding:7px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:5px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                   <span>${escapeHtml(entry.message||"")}</span>
+                   <span style="color:var(--slate);font-size:11.5px;white-space:nowrap;">${escapeHtml(fmtDate((entry.at||"").slice(0,10)))} ${escapeHtml((entry.at||"").slice(11,16))}</span>
+                 </div>`).join("")
+              : `<div style="color:var(--slate);">No activity recorded yet.</div>`}
+          </div>
+        </div>` : ""}
+
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="cancelBtn">Cancel</button>
           <button type="submit" class="btn">${isNew ? "Add Project" : "Save Changes"}</button>
@@ -3673,7 +3782,7 @@ function renderModal(){
     const contractValue = (fd.has("contractValue") ? fd.get("contractValue") : (p.contractValue||"")).toString().trim();
     const designAgreementValue = (fd.has("designAgreementValue") ? fd.get("designAgreementValue") : (p.designAgreementValue||"")).toString().trim();
     const errEl = document.getElementById("formError");
-    ["clientName","projectName","clientEmail","clientPhone","budget","contractValue","designAgreementValue"].forEach(n=>{
+    ["clientName","projectName","clientEmail","clientPhone","budget","contractValue","designAgreementValue","status"].forEach(n=>{
       const el = e.target.querySelector(`[name="${n}"]`);
       if(el) el.style.borderColor = "";
     });
@@ -3690,6 +3799,11 @@ function renderModal(){
     if(budget && (isNaN(Number(budget)) || Number(budget) < 0)){ showInvalid("budget", "Budget can't be negative."); return; }
     if(contractValue && (isNaN(Number(contractValue)) || Number(contractValue) < 0)){ showInvalid("contractValue", "Production Contract Value can't be negative."); return; }
     if(designAgreementValue && (isNaN(Number(designAgreementValue)) || Number(designAgreementValue) < 0)){ showInvalid("designAgreementValue", "Design Fee can't be negative."); return; }
+    const submittedStatus = fd.get("status");
+    if(!STAGES.includes(submittedStatus) && submittedStatus !== "Lost"){
+      showInvalid("status", "Please choose a valid project status.");
+      return;
+    }
     if(isNew && (clientEmail || clientPhone)){
       const dupe = state.projects.find(x=>
         (clientEmail && (x.clientEmail||"").trim().toLowerCase() === clientEmail.toLowerCase()) ||
@@ -3795,6 +3909,9 @@ function renderModal(){
       // above via the spread and are untouched.
       progressStep: resetDesignWizard ? "" : (enteredProductionPhase ? "production" : basis.progressStep)
     };
+    if(newStatus !== basis.status){
+      logActivity(updated, "phase", `Phase changed from "${basis.status}" to "${newStatus}"`);
+    }
     if(isNew){ state.projects.push(updated); } else {
       const i = state.projects.findIndex(x=>x.id===p.id);
       if(i === -1) state.projects.push(updated); else state.projects[i] = updated;
@@ -3936,6 +4053,33 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
 // We poll periodically so those updates show up here without a manual
 // reload — but only when it's safe (not mid-edit, not on the quotation
 // screen, no delete confirmation open) so we never clobber unsaved work.
+// Detects client-driven changes (agreement acceptance, payment submission,
+// KYC, bookings) by comparing the previous poll's data to the freshly
+// fetched copy, logging each one. Studio-initiated changes are already
+// logged at their own call sites — this only catches actions the CLIENT
+// made through their own (separately-locked-down) save path, which studio
+// only learns about via this poll. Returns true if anything was logged.
+function detectClientDrivenEvents(oldList, newList){
+  let changed = false;
+  const oldById = {};
+  (oldList||[]).forEach(p=>{ oldById[p.id] = p; });
+  newList.forEach(np=>{
+    const op = oldById[np.id];
+    if(!op) return; // brand-new project (e.g. just synced from a CRM lead) — nothing to diff against
+    const log = (type, msg)=>{ logActivity(np, type, msg); changed = true; };
+    if(!op.kycCompleted && np.kycCompleted) log("document", "Client completed KYC");
+    if(!op.siteVisitBookedAt && np.siteVisitBookedAt) log("phase", "Client booked a Site Measurement slot");
+    if(!op.materialSlotBookedAt && np.materialSlotBookedAt) log("phase", "Client booked a Material Selection slot");
+    if(!op.agreementAccepted && np.agreementAccepted) log("agreement", "Design Agreement accepted by client");
+    if(op.paymentStatus !== "submitted" && np.paymentStatus === "submitted") log("payment", "Client submitted Design payment proof");
+    if(!op.productionAgreementAccepted && np.productionAgreementAccepted) log("agreement", "Production Agreement accepted by client");
+    if(!op.finalQuotationAccepted && np.finalQuotationAccepted) log("agreement", "Final quotation accepted by client");
+    if(op.productionPaymentStatus !== "submitted" && np.productionPaymentStatus === "submitted") log("payment", "Client submitted Production payment proof");
+    if(op.status !== "Completed" && np.status === "Completed") log("phase", "Project marked Completed");
+  });
+  return changed;
+}
+
 async function refreshProjectsIfSafe(){
   if(state.screen !== "main") return;
   if(state.confirmDelete) return;
@@ -3953,7 +4097,12 @@ async function refreshProjectsIfSafe(){
   const scrollY = window.scrollY;
   try{
     const res = await window.storage.get(STORAGE_KEY, true);
-    state.projects = res && res.value ? JSON.parse(res.value) : state.projects;
+    const fresh = res && res.value ? JSON.parse(res.value) : null;
+    if(fresh){
+      const changed = detectClientDrivenEvents(state.projects, fresh);
+      state.projects = fresh;
+      if(changed){ try{ await saveProjects(); }catch(e){ /* log entries just won't persist this cycle */ } }
+    }
   }catch(e){ /* keep last known data on failure */ }
   render();
   window.scrollTo(0, scrollY);
@@ -3971,6 +4120,28 @@ async function refreshProjectsIfSafe(){
   setInterval(refreshProjectsIfSafe, 8000);
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refreshProjectsIfSafe(); });
   window.addEventListener("focus", refreshProjectsIfSafe);
+
+  const notifBellBtn = document.getElementById("notifBellBtn");
+  const notifDropdown = document.getElementById("notifDropdown");
+  if(notifBellBtn && notifDropdown){
+    notifBellBtn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      const opening = notifDropdown.style.display === "none";
+      notifDropdown.style.display = opening ? "block" : "none";
+      if(opening){
+        try{ localStorage.setItem("zynasty-studio-notif-lastseen", new Date().toISOString()); }catch(err){ /* ignore */ }
+        renderNotifications();
+      }
+    });
+    document.addEventListener("click", (e)=>{
+      if(notifDropdown.style.display !== "none" && !notifDropdown.contains(e.target) && e.target !== notifBellBtn){
+        notifDropdown.style.display = "none";
+      }
+    });
+    window.addEventListener("keydown", (e)=>{
+      if(e.key === "Escape" && notifDropdown.style.display !== "none") notifDropdown.style.display = "none";
+    });
+  }
 })();
 </script>
 </body>
