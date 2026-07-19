@@ -1329,6 +1329,28 @@ function logActivity(project, type, message){
   if(project.activityLog.length > 200) project.activityLog = project.activityLog.slice(-200);
 }
 
+// Design Studio can stay open for a long time with no background refresh
+// at all (see the state.screen guard in refreshProjectsIfSafe) — so this
+// project's other fields can go stale while it's open. Call this right
+// before saving any Design Studio change, so a client action elsewhere
+// (a payment, an agreement, downloading Material Selection, etc.) that
+// happened in the meantime doesn't get silently wiped out by this screen's
+// otherwise-protected save. designStudio itself is left untouched since
+// that's what this screen is actively editing.
+async function refreshProjectExceptDesignStudio(project){
+  try{
+    const res = await window.storage.get(STORAGE_KEY, true);
+    const freshList = res && res.value ? JSON.parse(res.value) : null;
+    const fresh = freshList && freshList.find(x=>x.id===project.id);
+    if(fresh){
+      const myDesignStudio = project.designStudio;
+      Object.keys(fresh).forEach(key=>{ if(key !== "designStudio") project[key] = fresh[key]; });
+      Object.keys(project).forEach(key=>{ if(key !== "designStudio" && !(key in fresh)) delete project[key]; });
+      project.designStudio = myDesignStudio;
+    }
+  }catch(e){ /* fall back to the in-memory copy if this fetch fails */ }
+}
+
 function ensureDesignStudio(p){
   if(!p.designStudio) p.designStudio = { threeD: { rooms: [] }, material: { rooms: [] } };
   if(!p.designStudio.threeD) p.designStudio.threeD = { rooms: [] };
@@ -1563,6 +1585,7 @@ function attachDesignStudioHandlers(){
       const data = designStudioTabData(p, state.designStudioTab);
       const room = data.rooms.find(r=>r.id===inp.dataset.room);
       if(room) room.name = inp.value;
+      await refreshProjectExceptDesignStudio(p);
       await saveProjects();
     });
   });
@@ -1577,6 +1600,7 @@ function attachDesignStudioHandlers(){
       data.rooms = data.rooms.filter(r=>r.id!==b.dataset.room);
       logActivity(p, "file", `Deleted room "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       render();
+      await refreshProjectExceptDesignStudio(p);
       await saveProjects();
       await Promise.all(imageIds.map(id=>window.storage.delete("design-image:"+id, true).catch(()=>{})));
     });
@@ -1609,6 +1633,7 @@ function attachDesignStudioHandlers(){
         logActivity(p, "file", `Uploaded ${uploaded} image${uploaded>1?"s":""} to "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       }
       render();
+      await refreshProjectExceptDesignStudio(p);
       await saveProjects();
     });
   });
@@ -1621,6 +1646,7 @@ function attachDesignStudioHandlers(){
       room.images = room.images.filter(id=>id!==b.dataset.img);
       logActivity(p, "file", `Removed an image from "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       render();
+      await refreshProjectExceptDesignStudio(p);
       await saveProjects();
       try{ await window.storage.delete("design-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
     });
@@ -1643,6 +1669,7 @@ function attachDesignStudioHandlers(){
       const result = await window.storage.set(key, pdfDataUrl, true);
       if(!result) throw new Error("Storage rejected the PDF (it may be too large — try fewer or smaller images).");
       logActivity(p, "document", `Published a new ${title} PDF`);
+      await refreshProjectExceptDesignStudio(p);
       await saveProjects();
       showToast("PDF saved! The client can now download it from their portal.");
     }catch(err){
@@ -2242,6 +2269,7 @@ function renderDsRoomPicker(){
     state.showDsRoomPicker = false;
     render();
     popEditHistoryIfNeeded();
+    await refreshProjectExceptDesignStudio(p);
     await saveProjects();
   };
 
@@ -2857,6 +2885,23 @@ function materialSlotInnerHtml(p){
      <button type="button" class="btn" id="confirmMaterialSlotBtn" data-id="${p.id}">✓ Confirm Slot</button>`;
 }
 
+// Same reasoning as refreshProjectExceptDesignStudio, for the project edit
+// modal's own quick-action buttons (material slot / site measurement
+// confirm, complete, undo): the modal can sit open for a while, so refresh
+// every field from the server right before saving a small, single-purpose
+// change, rather than writing back this whole (possibly stale) snapshot.
+async function refreshProjectFields(project){
+  try{
+    const res = await window.storage.get(STORAGE_KEY, true);
+    const freshList = res && res.value ? JSON.parse(res.value) : null;
+    const fresh = freshList && freshList.find(x=>x.id===project.id);
+    if(fresh){
+      Object.keys(fresh).forEach(key=>{ project[key] = fresh[key]; });
+      Object.keys(project).forEach(key=>{ if(!(key in fresh)) delete project[key]; });
+    }
+  }catch(e){ /* fall back to the in-memory copy if this fetch fails */ }
+}
+
 function refreshMaterialSlotPanel(project){
   const panel = document.getElementById("materialSlotPanel");
   if(panel){
@@ -2870,10 +2915,11 @@ function attachMaterialSlotHandlers(){
     confirmBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===confirmBtn.dataset.id);
       if(!project) return;
-      project.materialSlotConfirmed = true;
-      project.materialSlotConfirmedAt = new Date().toISOString();
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.materialSlotConfirmed = true;
+      project.materialSlotConfirmedAt = new Date().toISOString();
       await saveProjects();
       refreshMaterialSlotPanel(project);
     };
@@ -2883,10 +2929,11 @@ function attachMaterialSlotHandlers(){
     unconfirmBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===unconfirmBtn.dataset.id);
       if(!project) return;
-      project.materialSlotConfirmed = false;
-      project.materialSlotConfirmedAt = "";
       unconfirmBtn.disabled = true;
       unconfirmBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.materialSlotConfirmed = false;
+      project.materialSlotConfirmedAt = "";
       await saveProjects();
       refreshMaterialSlotPanel(project);
     };
@@ -2896,10 +2943,11 @@ function attachMaterialSlotHandlers(){
     completeBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===completeBtn.dataset.id);
       if(!project) return;
-      project.materialSelectionCompleted = true;
-      project.materialSelectionCompletedAt = new Date().toISOString();
       completeBtn.disabled = true;
       completeBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.materialSelectionCompleted = true;
+      project.materialSelectionCompletedAt = new Date().toISOString();
       await saveProjects();
       refreshMaterialSlotPanel(project);
     };
@@ -2909,10 +2957,11 @@ function attachMaterialSlotHandlers(){
     undoBtn.onclick = async ()=>{
       const project = state.projects.find(x=>x.id===undoBtn.dataset.id);
       if(!project) return;
-      project.materialSelectionCompleted = false;
-      project.materialSelectionCompletedAt = "";
       undoBtn.disabled = true;
       undoBtn.textContent = "Saving…";
+      await refreshProjectFields(project);
+      project.materialSelectionCompleted = false;
+      project.materialSelectionCompletedAt = "";
       await saveProjects();
       refreshMaterialSlotPanel(project);
     };
