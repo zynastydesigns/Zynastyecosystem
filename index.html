@@ -1898,10 +1898,15 @@ function attachClientHandlers(){
   // Each caller passes only the fields it just changed on p, so the RPC's
   // allow-list stays the source of truth for what a client can touch.
   //
-  // state.pendingSaves counts saves currently in flight. isRefreshUnsafe()
-  // checks this so the background poll/focus refresh never fetches while a
-  // save is still landing — otherwise it can win the race and overwrite the
-  // just-set local value with the pre-save server copy.
+  // state.pendingSaves counts saves currently in flight, and
+  // state.lastSaveCompletedAt marks when the most recent one finished.
+  // isRefreshUnsafe() checks both, so the background poll/focus refresh
+  // never fetches while a save is still landing OR in the few seconds
+  // right after. This was verified with a diagnostic (not just theory):
+  // immediately after a save, a direct re-fetch confirms the field IS
+  // correctly persisted — but a poll a few seconds later still reads an
+  // older copy and reverts the local UI. Whatever the exact reason (a
+  // slower read path, a cache layer, etc.), this window covers it.
   async function saveClientProject(p, updates){
     state.pendingSaves = (state.pendingSaves || 0) + 1;
     try{
@@ -1910,6 +1915,7 @@ function attachClientHandlers(){
       return ok;
     }finally{
       state.pendingSaves = Math.max(0, (state.pendingSaves || 1) - 1);
+      state.lastSaveCompletedAt = Date.now();
     }
   }
 
@@ -2117,6 +2123,7 @@ function attachClientHandlers(){
 function isRefreshUnsafe(){
   if(!state.clientResult) return false;
   if(state.pendingSaves) return true;
+  if(state.lastSaveCompletedAt && (Date.now() - state.lastSaveCompletedAt) < 5000) return true;
   const p = state.clientResult;
   const step = state.onboardingStep;
   if(p.status === "Lost") return true;
