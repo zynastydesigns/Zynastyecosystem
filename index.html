@@ -1907,6 +1907,7 @@ function attachClientHandlers(){
     try{
       const ok = await updateClientProject(p.accessCode, updates);
       if(!ok) console.error("Could not save progress");
+      return ok;
     }finally{
       state.pendingSaves = Math.max(0, (state.pendingSaves || 1) - 1);
     }
@@ -1966,9 +1967,19 @@ function attachClientHandlers(){
   if(downloadMaterialBtn){
     downloadMaterialBtn.onclick = ()=> downloadDesignPdf("material", state.clientResult.id, downloadMaterialBtn, document.getElementById("materialDownloadNote"), async ()=>{
       const p = state.clientResult;
+      const noteEl = document.getElementById("materialDownloadNote");
       if(!p.materialSelectionDownloadedAt){
-        p.materialSelectionDownloadedAt = new Date().toISOString();
-        await saveClientProject(p, { materialSelectionDownloadedAt: p.materialSelectionDownloadedAt });
+        const attemptedAt = new Date().toISOString();
+        p.materialSelectionDownloadedAt = attemptedAt;
+        const ok = await saveClientProject(p, { materialSelectionDownloadedAt: attemptedAt });
+        if(!ok){
+          // The save didn't stick server-side — don't show the Next button
+          // as if it worked, since it would just revert on the next refresh.
+          p.materialSelectionDownloadedAt = "";
+          if(noteEl) noteEl.textContent = "Downloaded, but couldn't save your progress — please try again or contact support.";
+          render();
+          return;
+        }
       }
       render();
     });
