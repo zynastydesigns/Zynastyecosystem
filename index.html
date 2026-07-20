@@ -632,6 +632,13 @@ async function refreshCurrentProject(){
         // already-open tab happened to be on.
         state.designStep = null;
         state.productionStep = null;
+        const newStep = updated.progressStep || "siteVisit";
+        if(newStep !== "material" && newStep !== "production"){
+          // Reset back before Material Selection — clear any stale local
+          // "downloaded" flag so a later pass through that step isn't
+          // mistaken for one already completed before the reset.
+          clearLocalProgressFlag(updated.id, "materialSelectionDownloadedAt");
+        }
       }
       const localDownloadFlag = getLocalProgressFlag(updated.id, "materialSelectionDownloadedAt");
       if(localDownloadFlag){
@@ -2024,14 +2031,6 @@ function attachClientHandlers(){
       state.productionStep = "transition";
       render();
       await saveClientProject(p, { progressStep: p.progressStep });
-      // Reapply once more shortly after, as reinforcement in case anything
-      // else touched this project between our save and now and reverted
-      // this field — cheap insurance on top of the local flag/refresh window.
-      setTimeout(()=>{
-        if(state.clientResult && state.clientResult.id === p.id && state.clientResult.progressStep === "production"){
-          saveClientProject(state.clientResult, { progressStep: "production" }).catch(()=>{});
-        }
-      }, 15000);
     };
   }
   const materialSlotForm = document.getElementById("materialSlotForm");
