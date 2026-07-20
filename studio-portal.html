@@ -381,6 +381,26 @@ window.storage = {
   }
 };
 
+// Atomic, single-project update: merges the given fields into just that one
+// project's record, server-side, without touching anything else in the
+// list. This replaces the old pattern of fetching the whole projects array,
+// changing something in the browser, and writing the whole array back —
+// which is what made concurrent edits (a client action landing while
+// Design Studio, Quotation, or a payment-verification panel was open)
+// silently overwrite each other. Falls back to null on failure so callers
+// can decide whether to retry via the old whole-list save.
+async function updateStudioProject(projectId, updates){
+  try{
+    const res = await sbFetchWithRetry(`${SUPABASE_URL}/rest/v1/rpc/update_studio_project`, {
+      method: "POST",
+      headers: { ...SB_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_project_id: projectId, p_updates: updates })
+    }, 3);
+    if(!res.ok) throw new Error(await res.text());
+    return true;
+  }catch(e){ console.error("Could not update project via RPC", e); return false; }
+}
+
 const STAGES = ["In Discussion","Onboarding","Design Development","In Progress","Install & Styling","Completed"];
 
 // ---------- Access gate: the Studio Portal only opens for someone who is
@@ -1329,28 +1349,6 @@ function logActivity(project, type, message){
   if(project.activityLog.length > 200) project.activityLog = project.activityLog.slice(-200);
 }
 
-// Design Studio can stay open for a long time with no background refresh
-// at all (see the state.screen guard in refreshProjectsIfSafe) — so this
-// project's other fields can go stale while it's open. Call this right
-// before saving any Design Studio change, so a client action elsewhere
-// (a payment, an agreement, downloading Material Selection, etc.) that
-// happened in the meantime doesn't get silently wiped out by this screen's
-// otherwise-protected save. designStudio itself is left untouched since
-// that's what this screen is actively editing.
-async function refreshProjectExceptDesignStudio(project){
-  try{
-    const res = await window.storage.get(STORAGE_KEY, true);
-    const freshList = res && res.value ? JSON.parse(res.value) : null;
-    const fresh = freshList && freshList.find(x=>x.id===project.id);
-    if(fresh){
-      const myDesignStudio = project.designStudio;
-      Object.keys(fresh).forEach(key=>{ if(key !== "designStudio") project[key] = fresh[key]; });
-      Object.keys(project).forEach(key=>{ if(key !== "designStudio" && !(key in fresh)) delete project[key]; });
-      project.designStudio = myDesignStudio;
-    }
-  }catch(e){ /* fall back to the in-memory copy if this fetch fails */ }
-}
-
 function ensureDesignStudio(p){
   if(!p.designStudio) p.designStudio = { threeD: { rooms: [] }, material: { rooms: [] } };
   if(!p.designStudio.threeD) p.designStudio.threeD = { rooms: [] };
@@ -1585,8 +1583,8 @@ function attachDesignStudioHandlers(){
       const data = designStudioTabData(p, state.designStudioTab);
       const room = data.rooms.find(r=>r.id===inp.dataset.room);
       if(room) room.name = inp.value;
-      await refreshProjectExceptDesignStudio(p);
-      await saveProjects();
+      const ok = await updateStudioProject(p.id, { designStudio: p.designStudio });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
     });
   });
 
@@ -1600,8 +1598,8 @@ function attachDesignStudioHandlers(){
       data.rooms = data.rooms.filter(r=>r.id!==b.dataset.room);
       logActivity(p, "file", `Deleted room "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       render();
-      await refreshProjectExceptDesignStudio(p);
-      await saveProjects();
+      const ok = await updateStudioProject(p.id, { designStudio: p.designStudio, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       await Promise.all(imageIds.map(id=>window.storage.delete("design-image:"+id, true).catch(()=>{})));
     });
   });
@@ -1633,8 +1631,8 @@ function attachDesignStudioHandlers(){
         logActivity(p, "file", `Uploaded ${uploaded} image${uploaded>1?"s":""} to "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       }
       render();
-      await refreshProjectExceptDesignStudio(p);
-      await saveProjects();
+      const ok = await updateStudioProject(p.id, { designStudio: p.designStudio, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
     });
   });
 
@@ -1646,8 +1644,8 @@ function attachDesignStudioHandlers(){
       room.images = room.images.filter(id=>id!==b.dataset.img);
       logActivity(p, "file", `Removed an image from "${room.name || "Untitled room"}" (${state.designStudioTab === "material" ? "Material Selection" : "3D Renders"})`);
       render();
-      await refreshProjectExceptDesignStudio(p);
-      await saveProjects();
+      const ok = await updateStudioProject(p.id, { designStudio: p.designStudio, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       try{ await window.storage.delete("design-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
     });
   });
@@ -1669,8 +1667,8 @@ function attachDesignStudioHandlers(){
       const result = await window.storage.set(key, pdfDataUrl, true);
       if(!result) throw new Error("Storage rejected the PDF (it may be too large — try fewer or smaller images).");
       logActivity(p, "document", `Published a new ${title} PDF`);
-      await refreshProjectExceptDesignStudio(p);
-      await saveProjects();
+      const ok = await updateStudioProject(p.id, { activityLog: p.activityLog });
+      if(!ok) console.error("Could not save activity log entry for PDF generation");
       showToast("PDF saved! The client can now download it from their portal.");
     }catch(err){
       console.error(err);
@@ -2154,10 +2152,10 @@ function attachQuotationHandlers(){
       // client portal already reflects the saved quotation.
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(project){
-        await refreshProjectFields(project);
         project.quotationSavedAt = new Date().toISOString();
         logActivity(project, "document", "Quotation saved");
-        await saveProjects();
+        const ok = await updateStudioProject(project.id, { quotationSavedAt: project.quotationSavedAt, activityLog: project.activityLog });
+        if(!ok) showToast("Could not save changes. Please try again.", true);
       }
       try{
         if(project){
@@ -2181,10 +2179,10 @@ function attachQuotationHandlers(){
       const t = computeQuoteTotals(state.quotation);
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
-      await refreshProjectFields(project);
       project.initialQuotation = Math.round(t.grandTotal);
       logActivity(project, "document", `Initial Quotation set to ${fmtMoney(project.initialQuotation)}`);
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { initialQuotation: project.initialQuotation, activityLog: project.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       await saveQuotation();
       showToast("Initial Quotation updated to " + fmtMoney(project.initialQuotation) + ".", false);
       render();
@@ -2198,14 +2196,14 @@ function attachQuotationHandlers(){
       const t = computeQuoteTotals(state.quotation);
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
-      await refreshProjectFields(project);
       const wasAlreadySet = !!project.finalQuotation;
       project.finalQuotation = Math.round(t.grandTotal);
       logActivity(project, "document", `Final Quotation ${wasAlreadySet ? "updated" : "set"} to ${fmtMoney(project.finalQuotation)}`);
       useAsFinalQuoteBtn.disabled = true;
       const originalLabel = useAsFinalQuoteBtn.textContent;
       useAsFinalQuoteBtn.textContent = wasAlreadySet ? "Updating…" : "Saving…";
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { finalQuotation: project.finalQuotation, activityLog: project.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       await saveQuotation();
       try{
         await generateAndStoreFinalQuotationPdf(project, state.quotation);
@@ -2272,8 +2270,8 @@ function renderDsRoomPicker(){
     state.showDsRoomPicker = false;
     render();
     popEditHistoryIfNeeded();
-    await refreshProjectExceptDesignStudio(p);
-    await saveProjects();
+    const ok = await updateStudioProject(p.id, { designStudio: p.designStudio });
+    if(!ok) showToast("Could not save changes. Please try again.", true);
   };
 
   document.querySelectorAll(".room-type-btn").forEach(btn=>{
@@ -2793,10 +2791,10 @@ function attachSiteMeasurementHandlers(){
       if(!project) return;
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.siteVisitConfirmed = true;
       project.siteVisitConfirmedAt = new Date().toISOString();
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { siteVisitConfirmed: true, siteVisitConfirmedAt: project.siteVisitConfirmedAt });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshSiteMeasurementPanel(project);
     };
   }
@@ -2807,10 +2805,10 @@ function attachSiteMeasurementHandlers(){
       if(!project) return;
       unconfirmBtn.disabled = true;
       unconfirmBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.siteVisitConfirmed = false;
       project.siteVisitConfirmedAt = "";
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { siteVisitConfirmed: false, siteVisitConfirmedAt: "" });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshSiteMeasurementPanel(project);
     };
   }
@@ -2821,10 +2819,10 @@ function attachSiteMeasurementHandlers(){
       if(!project) return;
       completeBtn.disabled = true;
       completeBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.siteMeasurementCompleted = true;
       project.siteMeasurementCompletedAt = new Date().toISOString();
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { siteMeasurementCompleted: true, siteMeasurementCompletedAt: project.siteMeasurementCompletedAt });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshSiteMeasurementPanel(project);
     };
   }
@@ -2835,10 +2833,10 @@ function attachSiteMeasurementHandlers(){
       if(!project) return;
       undoBtn.disabled = true;
       undoBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.siteMeasurementCompleted = false;
       project.siteMeasurementCompletedAt = "";
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { siteMeasurementCompleted: false, siteMeasurementCompletedAt: "" });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshSiteMeasurementPanel(project);
     };
   }
@@ -2892,23 +2890,6 @@ function materialSlotInnerHtml(p){
      <button type="button" class="btn" id="confirmMaterialSlotBtn" data-id="${p.id}">✓ Confirm Slot</button>`;
 }
 
-// Same reasoning as refreshProjectExceptDesignStudio, for the project edit
-// modal's own quick-action buttons (material slot / site measurement
-// confirm, complete, undo): the modal can sit open for a while, so refresh
-// every field from the server right before saving a small, single-purpose
-// change, rather than writing back this whole (possibly stale) snapshot.
-async function refreshProjectFields(project){
-  try{
-    const res = await window.storage.get(STORAGE_KEY, true);
-    const freshList = res && res.value ? JSON.parse(res.value) : null;
-    const fresh = freshList && freshList.find(x=>x.id===project.id);
-    if(fresh){
-      Object.keys(fresh).forEach(key=>{ project[key] = fresh[key]; });
-      Object.keys(project).forEach(key=>{ if(!(key in fresh)) delete project[key]; });
-    }
-  }catch(e){ /* fall back to the in-memory copy if this fetch fails */ }
-}
-
 function refreshMaterialSlotPanel(project){
   const panel = document.getElementById("materialSlotPanel");
   if(panel){
@@ -2924,10 +2905,10 @@ function attachMaterialSlotHandlers(){
       if(!project) return;
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.materialSlotConfirmed = true;
       project.materialSlotConfirmedAt = new Date().toISOString();
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { materialSlotConfirmed: true, materialSlotConfirmedAt: project.materialSlotConfirmedAt });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshMaterialSlotPanel(project);
     };
   }
@@ -2938,10 +2919,10 @@ function attachMaterialSlotHandlers(){
       if(!project) return;
       unconfirmBtn.disabled = true;
       unconfirmBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.materialSlotConfirmed = false;
       project.materialSlotConfirmedAt = "";
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { materialSlotConfirmed: false, materialSlotConfirmedAt: "" });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshMaterialSlotPanel(project);
     };
   }
@@ -2952,10 +2933,10 @@ function attachMaterialSlotHandlers(){
       if(!project) return;
       completeBtn.disabled = true;
       completeBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.materialSelectionCompleted = true;
       project.materialSelectionCompletedAt = new Date().toISOString();
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { materialSelectionCompleted: true, materialSelectionCompletedAt: project.materialSelectionCompletedAt });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshMaterialSlotPanel(project);
     };
   }
@@ -2966,10 +2947,10 @@ function attachMaterialSlotHandlers(){
       if(!project) return;
       undoBtn.disabled = true;
       undoBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.materialSelectionCompleted = false;
       project.materialSelectionCompletedAt = "";
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, { materialSelectionCompleted: false, materialSelectionCompletedAt: "" });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshMaterialSlotPanel(project);
     };
   }
@@ -3028,12 +3009,15 @@ function attachPaymentVerificationHandlers(){
       if(!project) return;
       verifyPaymentBtn.disabled = true;
       verifyPaymentBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.paymentStatus = "verified";
       project.paymentVerifiedAt = new Date().toISOString();
       project.paymentRejectionNote = "";
       logActivity(project, "payment", "Design payment verified");
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, {
+        paymentStatus: "verified", paymentVerifiedAt: project.paymentVerifiedAt,
+        paymentRejectionNote: "", activityLog: project.activityLog
+      });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshPaymentVerificationPanel(project);
     };
   }
@@ -3046,12 +3030,15 @@ function attachPaymentVerificationHandlers(){
       const noteValue = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
       rejectPaymentBtn.disabled = true;
       rejectPaymentBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.paymentStatus = "rejected";
       project.paymentVerifiedAt = new Date().toISOString();
       project.paymentRejectionNote = noteValue;
       logActivity(project, "payment", "Design payment rejected: " + project.paymentRejectionNote);
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, {
+        paymentStatus: "rejected", paymentVerifiedAt: project.paymentVerifiedAt,
+        paymentRejectionNote: noteValue, activityLog: project.activityLog
+      });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshPaymentVerificationPanel(project);
     };
   }
@@ -3113,12 +3100,15 @@ function attachProductionPaymentVerificationHandlers(){
       if(!project) return;
       verifyProductionPaymentBtn.disabled = true;
       verifyProductionPaymentBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.productionPaymentStatus = "verified";
       project.productionPaymentVerifiedAt = new Date().toISOString();
       project.productionPaymentRejectionNote = "";
       logActivity(project, "payment", "Production payment verified");
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, {
+        productionPaymentStatus: "verified", productionPaymentVerifiedAt: project.productionPaymentVerifiedAt,
+        productionPaymentRejectionNote: "", activityLog: project.activityLog
+      });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshProductionPaymentVerificationPanel(project);
     };
   }
@@ -3131,12 +3121,15 @@ function attachProductionPaymentVerificationHandlers(){
       const noteValue = (noteInput && noteInput.value.trim()) || "Please resubmit your payment proof.";
       rejectProductionPaymentBtn.disabled = true;
       rejectProductionPaymentBtn.textContent = "Saving…";
-      await refreshProjectFields(project);
       project.productionPaymentStatus = "rejected";
       project.productionPaymentVerifiedAt = new Date().toISOString();
       project.productionPaymentRejectionNote = noteValue;
       logActivity(project, "payment", "Production payment rejected: " + project.productionPaymentRejectionNote);
-      await saveProjects();
+      const ok = await updateStudioProject(project.id, {
+        productionPaymentStatus: "rejected", productionPaymentVerifiedAt: project.productionPaymentVerifiedAt,
+        productionPaymentRejectionNote: noteValue, activityLog: project.activityLog
+      });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
       refreshProductionPaymentVerificationPanel(project);
     };
   }
@@ -3927,9 +3920,10 @@ function renderModal(){
       }
     }
     const resetDesignWizard = movedBackToDiscussion || movedOutOfDesignPhase;
-    const updated = {
-      ...basis,
-      id: p.id,
+    // Only the fields this form actually changes — the RPC merges these
+    // onto whatever's currently in the database for this one project, so
+    // there's no need to reconstruct the whole record client-side anymore.
+    const fieldUpdates = {
       clientName: clientName, clientSalutation: fd.get("clientSalutation"), clientEmail: clientEmail, clientPhone: clientPhone,
       projectName: projectName, projectType: fd.get("projectType"),
       propertyAddress: (fd.get("propertyAddress")||"").trim(), budget: budget,
@@ -3972,21 +3966,30 @@ function renderModal(){
       progressStep: resetDesignWizard ? "" : (enteredProductionPhase ? "production" : basis.progressStep)
     };
     if(newStatus !== basis.status){
-      logActivity(updated, "phase", `Phase changed from "${basis.status}" to "${newStatus}"`);
+      logActivity(basis, "phase", `Phase changed from "${basis.status}" to "${newStatus}"`);
+      fieldUpdates.activityLog = basis.activityLog;
     }
-    if(isNew){ state.projects.push(updated); } else {
+    const merged = { ...basis, id: p.id, ...fieldUpdates };
+    if(isNew){
+      state.projects.push(merged);
+    } else {
       const i = state.projects.findIndex(x=>x.id===p.id);
-      if(i === -1) state.projects.push(updated); else state.projects[i] = updated;
+      if(i === -1) state.projects.push(merged); else state.projects[i] = merged;
     }
     state.editing = null;
     document.getElementById("overlay").remove();
     popEditHistoryIfNeeded();
     render();
-    try{
-      await saveProjects();
-    }catch(err){
-      console.error(err);
-      showToast("Could not save changes. Please try again.", true);
+    if(isNew){
+      try{
+        await saveProjects();
+      }catch(err){
+        console.error(err);
+        showToast("Could not save changes. Please try again.", true);
+      }
+    } else {
+      const ok = await updateStudioProject(p.id, fieldUpdates);
+      if(!ok) showToast("Could not save changes. Please try again.", true);
     }
   };
 }
