@@ -2496,6 +2496,38 @@ function fmtMoneyPdf(v){
   if(isNaN(n)) return "—";
   return "Rs. " + n.toLocaleString();
 }
+// THE single source of truth for "what screen is the client currently on":
+//   p.progressStep: "" or "siteVisit" | "renders" | "material" | "production"
+//   Within "production", the sub-step is derived (not separately stored)
+//   from three persisted flags, checked in this order:
+//     !p.productionAgreementAccepted   -> Welcome / Production Agreement
+//     !p.finalQuotationAccepted        -> Final Quotation review
+//     !p.productionCompleteAcknowledged-> Production Payment
+//     otherwise                        -> Complete
+// Client Portal derives its own view purely from these fields — never from
+// anything session-local that Studio can't see. Studio should treat
+// progressStep as read-only except through the explicit "Reset Client
+// Progress" control below, which is the one sanctioned way to move a
+// client backward — anything else risks the two portals disagreeing about
+// which screen the client should be on.
+function describeClientProgress(p){
+  const step = p.progressStep || "siteVisit";
+  if(step === "siteVisit"){
+    return (p.siteVisitDate && p.siteVisitTime) ? "Site Measurement — slot booked, awaiting studio confirmation" : "Site Measurement — booking a slot";
+  }
+  if(step === "renders") return "3D Renders — reviewing";
+  if(step === "material"){
+    return p.materialSelectionDownloadedAt ? "Material Selection — downloaded, ready to continue" : "Material Selection — reviewing";
+  }
+  if(step === "production"){
+    if(!p.productionAgreementAccepted) return "Production — Welcome / Agreement pending";
+    if(!p.finalQuotationAccepted) return "Production — reviewing Final Quotation";
+    if(!p.productionCompleteAcknowledged) return "Production — Payment";
+    return "Production — Complete";
+  }
+  return "Site Measurement";
+}
+
 function fmtDate(d){
   if(!d) return "—";
   const dt = new Date(d + "T00:00:00");
@@ -3650,6 +3682,14 @@ function renderModal(){
         </div>` : ""}
 
         ${!isNew ? `
+        <div class="section-label">Client Progress</div>
+        <div class="field-row">
+          <div class="field full" style="font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <span>Client is currently on: <strong>${escapeHtml(describeClientProgress(p))}</strong></span>
+            <button type="button" class="btn ghost" id="resetClientProgressBtn" data-id="${p.id}" style="font-size:12px;padding:6px 12px;">↺ Reset Client to Site Measurement</button>
+          </div>
+        </div>
+
         <div class="section-label">Activity Log</div>
         <div class="field-row">
           <div class="field full" style="font-size:13px;">
@@ -3673,6 +3713,22 @@ function renderModal(){
 
   document.getElementById("cancelBtn").onclick = ()=>{ closeEditSheetUI(); };
   document.getElementById("overlay").addEventListener("click",(e)=>{ if(e.target.id==="overlay"){ closeEditSheetUI(); }});
+  const resetClientProgressBtn = document.getElementById("resetClientProgressBtn");
+  if(resetClientProgressBtn){
+    resetClientProgressBtn.onclick = async ()=>{
+      if(!confirm("Move this client back to the start of Site Measurement? Their booking dates, payments, and signed agreements are kept — only the screen they land on resets.")) return;
+      resetClientProgressBtn.disabled = true;
+      resetClientProgressBtn.textContent = "Resetting…";
+      p.progressStep = "";
+      logActivity(p, "phase", "Studio reset client progress to Site Measurement");
+      const ok = await updateStudioProject(p.id, { progressStep: "", activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+      resetClientProgressBtn.disabled = false;
+      resetClientProgressBtn.textContent = "↺ Reset Client to Site Measurement";
+      const label = document.getElementById("resetClientProgressBtn").parentElement.querySelector("span");
+      if(label) label.innerHTML = `Client is currently on: <strong>${escapeHtml(describeClientProgress(p))}</strong>`;
+    };
+  }
   const assignedDesignerSelect = document.getElementById("assignedDesignerSelect");
   if(assignedDesignerSelect){
     assignedDesignerSelect.onchange = (e)=>{
