@@ -2146,7 +2146,7 @@ function attachClientHandlers(){
 function isRefreshUnsafe(){
   if(!state.clientResult) return false;
   if(state.pendingSaves) return true;
-  if(state.lastSaveCompletedAt && (Date.now() - state.lastSaveCompletedAt) < 5000) return true;
+  if(state.lastSaveCompletedAt && (Date.now() - state.lastSaveCompletedAt) < 1000) return true;
   const p = state.clientResult;
   const step = state.onboardingStep;
   if(p.status === "Lost") return true;
@@ -2166,7 +2166,7 @@ function isRefreshUnsafe(){
   if(progressStep === "material" && !(p.materialSlotDate && p.materialSlotTime)) return true;
   if(progressStep === "material" && (p.materialSelectionDownloadedAt || getLocalProgressFlag(p.id, "materialSelectionDownloadedAt"))){
     const downloadedAt = new Date(p.materialSelectionDownloadedAt || getLocalProgressFlag(p.id, "materialSelectionDownloadedAt")).getTime();
-    if(!isNaN(downloadedAt) && (Date.now() - downloadedAt) < 120000) return true; // 2-minute window
+    if(!isNaN(downloadedAt) && (Date.now() - downloadedAt) < 1000) return true; // 1-second window
   }
   return false;
 }
