@@ -1912,8 +1912,7 @@ function renderQuotation(){
 
     <div class="quote-actions">
       <button type="button" class="btn" id="saveQuoteBtn">Save Quotation</button>
-      <button type="button" class="btn ghost" id="useAsQuoteBtn">Use Total as Initial Quotation</button>
-      <button type="button" class="btn ghost" id="useAsFinalQuoteBtn">${project.finalQuotation ? "Update Final Quotation" : "Use Total as Final Quotation"}</button>
+      <button type="button" class="btn ghost" id="updateQuotationBtn">${(project.initialQuotation || project.finalQuotation) ? "Update Quotation" : "Use Total as Quotation"}</button>
     </div>
   `;
 }
@@ -2172,48 +2171,33 @@ function attachQuotationHandlers(){
     };
   }
 
-  const useAsQuoteBtn = document.getElementById("useAsQuoteBtn");
-  if(useAsQuoteBtn){
-    useAsQuoteBtn.onclick = async ()=>{
+  const updateQuotationBtn = document.getElementById("updateQuotationBtn");
+  if(updateQuotationBtn){
+    updateQuotationBtn.onclick = async ()=>{
       syncQuoteItemsFromDOM();
       const t = computeQuoteTotals(state.quotation);
       const project = state.projects.find(p=>p.id===state.quotationProjectId);
       if(!project) return;
-      project.initialQuotation = Math.round(t.grandTotal);
-      logActivity(project, "document", `Initial Quotation set to ${fmtMoney(project.initialQuotation)}`);
-      const ok = await updateStudioProject(project.id, { initialQuotation: project.initialQuotation, activityLog: project.activityLog });
-      if(!ok) showToast("Could not save changes. Please try again.", true);
-      await saveQuotation();
-      showToast("Initial Quotation updated to " + fmtMoney(project.initialQuotation) + ".", false);
-      render();
-    };
-  }
-
-  const useAsFinalQuoteBtn = document.getElementById("useAsFinalQuoteBtn");
-  if(useAsFinalQuoteBtn){
-    useAsFinalQuoteBtn.onclick = async ()=>{
-      syncQuoteItemsFromDOM();
-      const t = computeQuoteTotals(state.quotation);
-      const project = state.projects.find(p=>p.id===state.quotationProjectId);
-      if(!project) return;
-      const wasAlreadySet = !!project.finalQuotation;
-      project.finalQuotation = Math.round(t.grandTotal);
-      logActivity(project, "document", `Final Quotation ${wasAlreadySet ? "updated" : "set"} to ${fmtMoney(project.finalQuotation)}`);
-      useAsFinalQuoteBtn.disabled = true;
-      const originalLabel = useAsFinalQuoteBtn.textContent;
-      useAsFinalQuoteBtn.textContent = wasAlreadySet ? "Updating…" : "Saving…";
-      const ok = await updateStudioProject(project.id, { finalQuotation: project.finalQuotation, activityLog: project.activityLog });
+      const wasAlreadySet = !!(project.initialQuotation || project.finalQuotation);
+      const amount = Math.round(t.grandTotal);
+      project.initialQuotation = amount;
+      project.finalQuotation = amount;
+      logActivity(project, "document", `Quotation ${wasAlreadySet ? "updated" : "set"} to ${fmtMoney(amount)} (Onboarding & Production)`);
+      updateQuotationBtn.disabled = true;
+      const originalLabel = updateQuotationBtn.textContent;
+      updateQuotationBtn.textContent = wasAlreadySet ? "Updating…" : "Saving…";
+      const ok = await updateStudioProject(project.id, { initialQuotation: amount, finalQuotation: amount, activityLog: project.activityLog });
       if(!ok) showToast("Could not save changes. Please try again.", true);
       await saveQuotation();
       try{
         await generateAndStoreFinalQuotationPdf(project, state.quotation);
-        showToast((wasAlreadySet ? "Final Quotation updated to " : "Final Quotation set to ") + fmtMoney(project.finalQuotation) + ".", false);
+        showToast((wasAlreadySet ? "Quotation updated to " : "Quotation set to ") + fmtMoney(amount) + " for both Onboarding and Production.", false);
       }catch(e){
         console.error("Final Quotation PDF generation failed", e);
-        showToast("Final Quotation saved, but the PDF failed: " + (e && e.message ? e.message : "unknown error"), true);
+        showToast("Quotation saved, but the PDF failed: " + (e && e.message ? e.message : "unknown error"), true);
       }
-      useAsFinalQuoteBtn.disabled = false;
-      useAsFinalQuoteBtn.textContent = originalLabel;
+      updateQuotationBtn.disabled = false;
+      updateQuotationBtn.textContent = originalLabel;
       render();
     };
   }
@@ -3722,7 +3706,23 @@ function renderModal(){
       p.progressStep = "";
       logActivity(p, "phase", "Studio reset client progress to Site Measurement");
       const ok = await updateStudioProject(p.id, { progressStep: "", activityLog: p.activityLog });
-      if(!ok) showToast("Could not save changes. Please try again.", true);
+      if(!ok){
+        showToast("Could not save changes. Please try again.", true);
+      } else {
+        // DIAGNOSTIC: re-fetch the raw record straight from the database
+        // (not our own in-memory copy) to confirm the reset actually
+        // persisted, rather than assuming success just because the RPC
+        // call returned OK.
+        try{
+          const res = await window.storage.get(STORAGE_KEY);
+          const freshList = res && res.value ? JSON.parse(res.value) : null;
+          const freshProject = freshList && freshList.find(x=>x.id===p.id);
+          console.log("[diagnostic] progressStep in database right after reset:", freshProject ? JSON.stringify(freshProject.progressStep) : "(project not found)");
+          if(freshProject && freshProject.progressStep){
+            showToast(`Diagnostic: the RPC reported success, but the database still shows progressStep="${freshProject.progressStep}" immediately afterward. The reset did not actually persist.`, true);
+          }
+        }catch(err){ console.error("[diagnostic] verification fetch failed", err); }
+      }
       resetClientProgressBtn.disabled = false;
       resetClientProgressBtn.textContent = "↺ Reset Client to Site Measurement";
       const label = document.getElementById("resetClientProgressBtn").parentElement.querySelector("span");
