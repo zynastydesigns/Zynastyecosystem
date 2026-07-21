@@ -664,6 +664,7 @@ const STAGE_COLORS = ["#B5654A","#C08A4E","#A9814F","#8C8F5E","#74845F","#5F7A56
 const STORAGE_KEY = "projects";
 const PRESETS_KEY = "itemPresets";
 const DESIGNERS_KEY = "designers";
+const AMC_KEY = "amc_requests";
 
 const DEFAULT_PRESETS = [
   { name: "Base Unit", features: "BWR 16mm Ply with 1mm Laminate box, shutters and Soft Close Hinges (Glossy)", cat: "Modular Kitchen", unit: "sqft", rate: 1000 },
@@ -694,7 +695,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, showDsRoomPicker: false, dsRoomPickerName: "" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all" };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -858,6 +859,16 @@ async function loadDesigners(){
     state.designers = [];
   }
   state.designersLoaded = true;
+}
+
+async function loadAmcRequests(){
+  try{
+    const res = await window.storage.get(AMC_KEY, true);
+    state.amcRequests = res && res.value ? JSON.parse(res.value) : [];
+  }catch(e){
+    state.amcRequests = [];
+  }
+  state.amcRequestsLoaded = true;
 }
 
 async function saveDesigners(excludeIds){
@@ -2619,7 +2630,7 @@ function render(){
 
   const headerBack = document.getElementById("headerBack");
   const headerCrmLink = document.getElementById("headerCrmLink");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "amcRequests"){
     headerBack.style.display = "inline-block";
     if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
@@ -2652,6 +2663,12 @@ function render(){
     attachDesignersHandlers();
     if(state.editingDesigner !== null) renderDesignerModal();
     renderConfirmDeleteDesigner();
+    return;
+  }
+
+  if(state.screen === "amcRequests"){
+    main.innerHTML = renderAmcRequests();
+    attachAmcRequestsHandlers();
     return;
   }
 
@@ -2697,6 +2714,7 @@ function renderStudio(){
         ${STAGES.map(s=>`<option value="${s}" ${state.filter===s?"selected":""}>${s}</option>`).join("")}
       </select>` : ""}
       <button class="btn ghost" id="designerProfilesBtn">Designer Profiles</button>
+      <button class="btn ghost" id="amcRequestsBtn">AMC Requests${(()=>{ const openCount = state.amcRequests.filter(r=>r.status==="Open").length; return openCount ? ` (${openCount})` : ""; })()}</button>
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
 
@@ -3270,6 +3288,187 @@ function attachDesignersHandlers(){
       await saveDesigners();
     });
   });
+}
+
+const AMC_STATUSES = ["Open","Accepted","Scheduled","Resolved","Closed"];
+const AMC_STATUS_COLORS = { "Open":"#B5654A", "Accepted":"#C08A4E", "Scheduled":"#8C8F5E", "Resolved":"#5F7A56", "Closed":"#8a8878" };
+const AMC_PRIORITY_COLORS = { "Low":"#8a8878", "Normal":"#C08A4E", "Urgent":"#B5654A" };
+const AMC_PRIORITIES_STUDIO = ["Low","Normal","Urgent"];
+
+function renderAmcRequests(){
+  if(state.amcSelectedId){
+    const ticket = (state.amcRequests||[]).find(r=>r.id===state.amcSelectedId);
+    if(ticket) return renderAmcDetail(ticket);
+    state.amcSelectedId = null;
+  }
+
+  const filter = state.amcStatusFilter || "all";
+  const list = (state.amcRequests||[]).filter(r=> filter==="all" || r.status===filter);
+  const sorted = [...list].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
+
+  const toolbar = `
+    <div class="toolbar">
+      <select id="amcStatusFilterSelect">
+        <option value="all" ${filter==="all"?"selected":""}>All statuses</option>
+        ${AMC_STATUSES.map(s=>`<option value="${s}" ${filter===s?"selected":""}>${s}</option>`).join("")}
+      </select>
+      <div style="flex:1;"></div>
+    </div>`;
+
+  if(!sorted.length){
+    return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + toolbar + `
+      <div class="empty">
+        <div class="display">No service requests${filter!=="all" ? ` with status "${escapeHtml(filter)}"` : ""}</div>
+        <div>Requests clients raise from their portal will show up here.</div>
+      </div>`;
+  }
+
+  const cards = sorted.map(r=>`
+    <div class="card amcTicketCard" data-id="${r.id}" style="cursor:pointer;">
+      <div class="card-top">
+        <div>
+          <div class="card-title">${escapeHtml(r.title)}</div>
+          <div class="card-client">${escapeHtml(r.projectName||r.clientName||"—")}</div>
+        </div>
+        <span class="pill" style="background:${AMC_STATUS_COLORS[r.status]||"#8a8878"};">${escapeHtml(r.status)}</span>
+      </div>
+      <div class="facts" style="grid-template-columns:1fr 1fr 1fr;">
+        <div><div class="fact-label">Priority</div><div class="fact-val" style="color:${AMC_PRIORITY_COLORS[r.priority]||"inherit"};">${escapeHtml(r.priority)}</div></div>
+        <div><div class="fact-label">Raised</div><div class="fact-val">${escapeHtml(fmtDate((r.createdAt||"").slice(0,10)))}</div></div>
+        <div><div class="fact-label">Technician</div><div class="fact-val">${r.technicianName ? escapeHtml(r.technicianName) : "Unassigned"}</div></div>
+      </div>
+    </div>`).join("");
+
+  return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + toolbar + `<div class="grid">${cards}</div>`;
+}
+
+function renderAmcDetail(ticket){
+  return `
+    <button type="button" class="back-link" id="amcDetailBackBtn" style="margin-bottom:14px;background:none;border:none;cursor:pointer;color:var(--slate);font-size:13px;">← All Requests</button>
+    <div class="display" style="font-size:22px;margin-bottom:4px;">${escapeHtml(ticket.title)}</div>
+    <div style="color:var(--slate);font-size:13.5px;margin-bottom:18px;">${escapeHtml(ticket.projectName||ticket.clientName||"—")} · Raised ${escapeHtml(fmtDate((ticket.createdAt||"").slice(0,10)))}</div>
+
+    <div class="portal-box" style="max-width:640px;margin-bottom:18px;padding:20px;border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:14px;line-height:1.6;white-space:pre-wrap;margin-bottom:16px;">${escapeHtml(ticket.description)}</div>
+      <div class="field-row">
+        <div class="field"><label>Status</label>
+          <select id="amcStatusSelect" data-id="${ticket.id}">
+            ${AMC_STATUSES.map(s=>`<option value="${s}" ${ticket.status===s?"selected":""}>${s}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field"><label>Priority</label>
+          <select id="amcPrioritySelect" data-id="${ticket.id}">
+            ${AMC_PRIORITIES_STUDIO.map(p=>`<option value="${p}" ${ticket.priority===p?"selected":""}>${p}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Service Date</label><input type="date" id="amcServiceDateInput" value="${escapeAttr(ticket.serviceDate||"")}"></div>
+        <div class="field"><label>Service Time</label><input type="time" id="amcServiceTimeInput" value="${escapeAttr(ticket.serviceTime||"")}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field full"><label>Assigned Technician</label><input type="text" id="amcTechnicianInput" placeholder="Technician name" value="${escapeAttr(ticket.technicianName||"")}"></div>
+      </div>
+      <div class="modal-actions" style="justify-content:flex-start;">
+        <button type="button" class="btn" id="amcSaveAssignmentBtn" data-id="${ticket.id}">Save</button>
+      </div>
+    </div>
+
+    <div class="display" style="font-size:16px;margin-bottom:10px;">Comments</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-width:640px;max-height:320px;overflow-y:auto;">
+      ${(ticket.comments && ticket.comments.length)
+        ? ticket.comments.map(c=>`<div style="padding:9px 11px;border-radius:8px;background:${c.author==="client"?"#f4f2ee":"#eef4ec"};font-size:13.5px;">
+            <div style="font-weight:600;font-size:12px;color:var(--slate);margin-bottom:3px;">${c.author==="client"?"Client":"Studio"} · ${escapeHtml(fmtDate((c.at||"").slice(0,10)))} ${escapeHtml((c.at||"").slice(11,16))}</div>
+            <div style="white-space:pre-wrap;">${escapeHtml(c.text||"")}</div>
+          </div>`).join("")
+        : `<div style="color:var(--slate);font-size:13.5px;">No comments yet.</div>`}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;max-width:480px;">
+      <textarea id="amcStudioCommentInput" placeholder="Write a comment — the client will see this…" style="width:100%;min-height:70px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;"></textarea>
+      <button type="button" class="btn" id="amcStudioAddCommentBtn" data-id="${ticket.id}" style="align-self:flex-start;">Post Comment</button>
+    </div>
+  `;
+}
+
+function attachAmcRequestsHandlers(){
+  const filterSelect = document.getElementById("amcStatusFilterSelect");
+  if(filterSelect) filterSelect.onchange = (e)=>{ state.amcStatusFilter = e.target.value; render(); };
+
+  document.querySelectorAll(".amcTicketCard").forEach(card=>{
+    card.addEventListener("click", ()=>{ state.amcSelectedId = card.dataset.id; render(); });
+  });
+
+  const backBtn = document.getElementById("amcDetailBackBtn");
+  if(backBtn) backBtn.onclick = ()=>{ state.amcSelectedId = null; render(); };
+
+  const saveBtn = document.getElementById("amcSaveAssignmentBtn");
+  if(saveBtn){
+    saveBtn.onclick = async ()=>{
+      const ticket = state.amcRequests.find(r=>r.id===saveBtn.dataset.id);
+      if(!ticket) return;
+      const statusSelect = document.getElementById("amcStatusSelect");
+      const prioritySelect = document.getElementById("amcPrioritySelect");
+      const dateInput = document.getElementById("amcServiceDateInput");
+      const timeInput = document.getElementById("amcServiceTimeInput");
+      const techInput = document.getElementById("amcTechnicianInput");
+      const updates = {
+        status: statusSelect.value,
+        priority: prioritySelect.value,
+        serviceDate: dateInput.value || "",
+        serviceTime: timeInput.value || "",
+        technicianName: techInput.value.trim()
+      };
+      const changedNotes = [];
+      if(updates.status !== ticket.status) changedNotes.push(`status → ${updates.status}`);
+      if(updates.technicianName && updates.technicianName !== ticket.technicianName) changedNotes.push(`technician assigned: ${updates.technicianName}`);
+      if(updates.serviceDate && updates.serviceDate !== ticket.serviceDate) changedNotes.push(`scheduled for ${updates.serviceDate}`);
+      Object.assign(ticket, updates);
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving…";
+      const ok = await updateStudioAmcRequest(ticket.id, updates);
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+      else if(changedNotes.length) showToast("Updated: " + changedNotes.join(", "), false);
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      render();
+    };
+  }
+
+  const addCommentBtn = document.getElementById("amcStudioAddCommentBtn");
+  if(addCommentBtn){
+    addCommentBtn.onclick = async ()=>{
+      const ticket = state.amcRequests.find(r=>r.id===addCommentBtn.dataset.id);
+      if(!ticket) return;
+      const input = document.getElementById("amcStudioCommentInput");
+      const text = (input.value||"").trim();
+      if(!text) return;
+      const comment = { author: "studio", text, at: new Date().toISOString() };
+      if(!Array.isArray(ticket.comments)) ticket.comments = [];
+      ticket.comments.push(comment);
+      addCommentBtn.disabled = true;
+      addCommentBtn.textContent = "Posting…";
+      const ok = await updateStudioAmcRequest(ticket.id, { comments: ticket.comments });
+      if(!ok) showToast("Could not post your comment. Please try again.", true);
+      addCommentBtn.disabled = false;
+      addCommentBtn.textContent = "Post Comment";
+      render();
+    };
+  }
+}
+
+// Atomic, single-ticket update for AMC requests — same pattern as
+// updateStudioProject, so two staff members updating different tickets (or
+// the same ticket) at the same time can't silently overwrite each other.
+async function updateStudioAmcRequest(ticketId, updates){
+  try{
+    const res = await sbFetchWithRetry(`${SUPABASE_URL}/rest/v1/rpc/update_studio_amc_request`, {
+      method: "POST",
+      headers: { ...SB_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_ticket_id: ticketId, p_updates: updates })
+    }, 3);
+    if(!res.ok) throw new Error(await res.text());
+    return true;
+  }catch(e){ console.error("Could not update AMC request via RPC", e); return false; }
 }
 
 function renderDesignerModal(){
@@ -4070,6 +4269,15 @@ function attachStudioHandlers(){
     if(!state.designersLoaded){ await loadDesigners(); render(); }
   };
 
+  const amcBtn = document.getElementById("amcRequestsBtn");
+  if(amcBtn) amcBtn.onclick = async ()=>{
+    state.screen = "amcRequests";
+    state.amcSelectedId = null;
+    render();
+    await loadAmcRequests();
+    render();
+  };
+
   document.querySelectorAll(".section-tab").forEach(tab=>{
     tab.addEventListener("click", ()=>{
       state.section = tab.dataset.section;
@@ -4139,6 +4347,12 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
     render();
     return;
   }
+  if(state.screen === "amcRequests"){
+    state.screen = "main";
+    state.amcSelectedId = null;
+    render();
+    return;
+  }
   if(state.screen === "designers"){
     state.screen = "main";
     const designerModalWasOpen = state.editingDesigner !== null || state.confirmDeleteDesigner !== null;
@@ -4202,6 +4416,24 @@ function detectClientDrivenEvents(oldList, newList){
 }
 
 async function refreshProjectsIfSafe(){
+  if(state.screen === "amcRequests"){
+    // Don't refresh out from under someone mid-way through typing a
+    // comment or editing the assignment fields — a re-render would wipe
+    // any of these, same class of bug fixed earlier in Client Portal for
+    // its own comment/booking forms.
+    const draftComment = document.getElementById("amcStudioCommentInput");
+    const techInput = document.getElementById("amcTechnicianInput");
+    const ticketBeingEdited = state.amcSelectedId ? state.amcRequests.find(r=>r.id===state.amcSelectedId) : null;
+    const draftTech = techInput && ticketBeingEdited && techInput.value.trim() !== (ticketBeingEdited.technicianName||"").trim();
+    if((draftComment && draftComment.value.trim()) || draftTech) return;
+    try{
+      const res = await window.storage.get(AMC_KEY, true);
+      const fresh = res && res.value ? JSON.parse(res.value) : null;
+      if(fresh) state.amcRequests = fresh;
+    }catch(e){ /* keep last known data on failure */ }
+    render();
+    return;
+  }
   if(state.screen !== "main") return;
   if(state.confirmDelete) return;
   if(state.editing){
@@ -4238,6 +4470,7 @@ async function refreshProjectsIfSafe(){
   showApp();
   loadProjects();
   loadDesigners();
+  loadAmcRequests();
   setInterval(refreshProjectsIfSafe, 8000);
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refreshProjectsIfSafe(); });
   window.addEventListener("focus", refreshProjectsIfSafe);
