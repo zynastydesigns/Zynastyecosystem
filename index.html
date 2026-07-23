@@ -358,6 +358,16 @@ try{
     cashfreeInstance = window.Cashfree({ mode: CASHFREE_MODE });
   }
 }catch(e){ console.error("Could not initialize Cashfree SDK", e); }
+
+// AMC (Annual Maintenance Contract) plan amount, in rupees. Deliberately
+// left unset here — set this to your actual configured plan fee (the
+// source document quoted ₹15,499 + applicable taxes, but pricing was
+// intentionally left out of this page's content per instruction). While
+// this is 0/unset, the AMC Plan page shows a "contact us to activate"
+// message instead of a broken Pay button, same fallback pattern already
+// used for the Production payment amount below.
+const AMC_PLAN_AMOUNT = 0;
+const AMC_PLAN_VALIDITY_MONTHS = 12;
 const DEFAULT_WELCOME_MESSAGE = `Welcome to Zynasty Design.
 
 We are happy to have you here.
@@ -558,7 +568,7 @@ function generateProductionAgreementPdf(project){
   doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Production-Stage-Agreement.pdf");
 }
 
-let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcShowNewForm: false };
+let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcView: "home", amcJustActivated: false, amcFormPreset: null };
 const AMC_KEY = "amc_requests";
 
 // Remembers which project this browser is currently looking at, so a reload
@@ -634,12 +644,57 @@ async function loadAmcRequests(){
   }
 }
 
-async function createAmcRequest(accessCode, title, description, priority){
+// Reads and downsizes an image file to a compact JPEG data URL. Same
+// canvas-resize technique already used for payment proof / KYC uploads,
+// factored out so the AMC support form (which can attach up to 4 images
+// inline in the ticket, rather than each as its own storage key) doesn't
+// bloat the ticket record.
+function compressImageFileForUpload(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxDim = 900;
+        let w = img.width, h = img.height;
+        if(w > maxDim || h > maxDim){
+          const scale = maxDim / Math.max(w,h);
+          w = Math.round(w*scale); h = Math.round(h*scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.6));
+      };
+      img.onerror = ()=>resolve(reader.result);
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function newAmcTicketId(){
+  return "amc_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+async function createAmcRequest(accessCode, opts){
   try{
     const res = await sbFetchWithRetry(`${SUPABASE_URL}/rest/v1/rpc/create_amc_request`, {
       method: "POST",
       headers: { ...SB_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ p_access_code: accessCode, p_title: title, p_description: description, p_priority: priority })
+      body: JSON.stringify({
+        p_access_code: accessCode,
+        p_title: opts.subject,
+        p_description: opts.description,
+        p_priority: opts.priority || "Normal",
+        p_service_type: opts.serviceType || "General Service",
+        p_preferred_date: opts.preferredDate || "",
+        p_preferred_time: opts.preferredTime || "",
+        p_images: opts.images || [],
+        p_amc_status: opts.amcStatus || "Not Active",
+        p_ticket_id: opts.ticketId || null
+      })
     }, 3);
     if(!res.ok) throw new Error(await res.text());
     return true;
@@ -864,64 +919,194 @@ function render(){
 }
 
 const AMC_PRIORITIES = ["Low","Normal","Urgent"];
-const AMC_STATUS_COLORS = { "Open":"#B5654A", "Accepted":"#C08A4E", "Scheduled":"#8C8F5E", "Resolved":"#5F7A56", "Closed":"var(--slate)" };
+const AMC_STATUSES = ["Pending","Assigned","In Progress","Completed"];
+const AMC_STATUS_COLORS = { "Pending":"#B5654A", "Assigned":"#C08A4E", "In Progress":"#8C8F5E", "Completed":"#5F7A56" };
+const AMC_SERVICE_TYPES = ["General Service","Breakdown Service"];
+const AMC_TIME_SLOTS = ["Morning (9 AM – 12 PM)","Afternoon (12 PM – 4 PM)","Evening (4 PM – 7 PM)"];
+const AMC_MAX_IMAGES = 4;
 
-function renderAmcSection(p){
-  if(state.amcShowNewForm){
-    return `
-      <div class="portal-box" style="max-width:560px;">
-        <h3>Raise a Service Request</h3>
-        <div style="font-size:13.5px;color:var(--slate);margin-bottom:16px;">Tell us what's going on — our team will review it and get a technician scheduled.</div>
-        <form id="amcNewForm" style="display:flex;flex-direction:column;gap:12px;">
-          <div>
-            <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Title</label>
-            <input type="text" id="amcNewTitleInput" name="title" required placeholder="e.g. Kitchen cabinet hinge is loose" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;">
+function fmtAmcDateTime(iso){
+  if(!iso) return "";
+  return escapeHtml(fmtDate((iso||"").slice(0,10))) + " " + escapeHtml((iso||"").slice(11,16));
+}
+
+// ---- Screen 1: Handover Completion Screen ----
+function renderAmcHome(p){
+  return `
+    <div class="portal-box" style="max-width:680px;">
+      <h2 style="margin-top:0;">Thank You for Choosing Zynasty Design</h2>
+      <div style="font-size:14.5px;line-height:1.75;color:var(--ink);margin-bottom:24px;">
+        Congratulations on your new space! Thank you for trusting Zynasty Design with your dream interiors.
+        It has been a pleasure bringing your vision to life. Our relationship doesn't end with the handover.
+        We will stay connected for your feedback and continue providing after-sales support whenever you need us.
+      </div>
+      <div class="portal-grid">
+        <div class="portal-box" style="border:1px solid var(--line);">
+          <div style="font-size:26px;margin-bottom:6px;">🛠️</div>
+          <h3>After-Sales Support</h3>
+          <div style="font-size:13.5px;color:var(--slate);line-height:1.6;margin-bottom:16px;">If you need any assistance, maintenance, or have any concerns regarding your interiors, our support team is here to help.</div>
+          <button type="button" class="btn" id="amcGoSupportBtn">Request Support</button>
+        </div>
+        <div class="portal-box" style="border:1px solid var(--line);">
+          <div style="font-size:26px;margin-bottom:6px;">🛡️</div>
+          <h3>Annual Maintenance Contract (AMC)</h3>
+          <div style="font-size:13.5px;color:var(--slate);line-height:1.6;margin-bottom:16px;">Enjoy priority support, preventive maintenance, scheduled inspections, hardware checks, discounted repairs, and long-term care for your interiors.</div>
+          <button type="button" class="btn" id="amcGoPlanBtn">${p.amcActive ? "View AMC Plan" : "Get AMC Plan"}</button>
+        </div>
+      </div>
+      <div style="margin-top:20px;text-align:center;">
+        <button type="button" class="back-link" id="amcGoListBtn" style="background:none;border:none;cursor:pointer;">View My Support Requests${state.amcRequests.length ? ` (${state.amcRequests.length})` : ""} →</button>
+      </div>
+    </div>`;
+}
+
+// ---- Screen 2: AMC Plan Page ----
+function renderAmcPlan(p){
+  const activatedNote = state.amcJustActivated
+    ? `<div style="margin-bottom:18px;padding:14px 16px;background:#eef4ec;border:1px solid #b9d3b1;border-radius:8px;font-size:14px;color:#3a5c33;font-weight:600;">✓ Your AMC has been activated successfully.</div>`
+    : "";
+
+  const activeStatusBox = p.amcActive ? `
+    <div style="margin-bottom:20px;padding:14px 16px;background:#eef4ec;border:1px solid #b9d3b1;border-radius:8px;font-size:13.5px;color:#3a5c33;">
+      <strong>AMC Active</strong><br>
+      Activated ${p.amcPaymentDate ? escapeHtml(fmtDate((p.amcPaymentDate||"").slice(0,10))) : "—"} · Valid until ${p.amcExpiryDate ? escapeHtml(fmtDate((p.amcExpiryDate||"").slice(0,10))) : "—"}
+    </div>` : "";
+
+  return `
+    <button type="button" class="back-link" id="amcBackToHomeBtn" style="margin-bottom:14px;background:none;border:none;cursor:pointer;">← Back</button>
+    <div class="portal-box" style="max-width:680px;">
+      <div style="font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:var(--brass);margin-bottom:4px;">Zynasty Annual Maintenance Plan</div>
+      <h2 style="margin-top:0;">Because Great Interiors Deserve Great Care</h2>
+      ${activatedNote}
+      ${activeStatusBox}
+
+      <h3>Overview</h3>
+      <div style="font-size:14px;line-height:1.7;margin-bottom:18px;">Keeping your interiors beautiful, functional, and worry-free throughout the year — our Annual Maintenance Plan covers routine servicing and preventive care so small issues never become expensive repairs.</div>
+
+      <h3>What's Included</h3>
+      <ul style="font-size:14px;line-height:1.8;padding-left:20px;margin-bottom:18px;">
+        <li>Labour-free service throughout the validity of the plan.</li>
+        <li>Two preventive maintenance visits per year (every 6 months).</li>
+        <li>Hardware inspection & servicing of hinges, channels, handles, locks, and other installed hardware.</li>
+        <li>Interior care & cleaning, including basic cleaning and lubrication of hardware components.</li>
+        <li>Preventive maintenance to identify wear and tear early and reduce major repair costs.</li>
+      </ul>
+
+      <h3>Exclusive Benefits</h3>
+      <ul style="font-size:14px;line-height:1.8;padding-left:20px;margin-bottom:18px;">
+        <li>Labour charges covered during the active plan period.</li>
+        <li>Priority support for maintenance requests.</li>
+        <li>Regular health checks of installed hardware.</li>
+        <li>Improved durability and performance of interiors.</li>
+        <li>Peace of mind with professional after-sales support.</li>
+      </ul>
+
+      <h3>Pricing</h3>
+      <div style="font-size:14px;line-height:1.7;margin-bottom:18px;color:var(--slate);">Contact our team for current plan pricing.</div>
+
+      <h3>Validity</h3>
+      <div style="font-size:14px;line-height:1.7;margin-bottom:18px;">Valid for ${AMC_PLAN_VALIDITY_MONTHS} months from the date of activation.</div>
+
+      <h3>Terms & Conditions</h3>
+      <ul style="font-size:13.5px;line-height:1.8;padding-left:20px;color:var(--slate);margin-bottom:22px;">
+        <li>Covers routine maintenance and servicing only.</li>
+        <li>Replacement of damaged hardware, materials, or accessories (if required) will be charged separately after customer approval.</li>
+        <li>Customers who maintain their interiors in good condition and follow recommended care practices may be eligible for special discounts on the next year's plan.</li>
+      </ul>
+
+      <div id="amcCashfreeErrorMsg" style="display:none;margin-bottom:14px;padding:12px 14px;background:#faeaea;border:1px solid #e3b8b8;border-radius:8px;font-size:13.5px;color:#a33d3d;"></div>
+
+      ${p.amcActive
+        ? `<button type="button" class="btn" id="amcRequestServiceBtn">Request AMC Service</button>`
+        : `<button type="button" class="btn" id="payAmcCashfreeBtn" data-project-id="${escapeAttr(p.id)}">Activate AMC Plan</button>`}
+    </div>`;
+}
+
+// ---- Screen 3: Support Request Form (shared by plain support & AMC service) ----
+function renderAmcSupportForm(p){
+  const preset = state.amcFormPreset || {};
+  return `
+    <button type="button" class="back-link" id="amcBackToHomeBtn" style="margin-bottom:14px;background:none;border:none;cursor:pointer;">← Back</button>
+    <div class="portal-box" style="max-width:560px;">
+      <h3>${preset.amc ? "Request AMC Service" : "Request Support"}</h3>
+      <div style="font-size:13.5px;color:var(--slate);margin-bottom:16px;">Tell us what's going on — our team will review it and get a technician scheduled.</div>
+      <form id="amcNewForm" style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Service Type</label>
+          <select id="amcServiceTypeSelect" name="serviceType" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;">
+            ${AMC_SERVICE_TYPES.map(s=>`<option ${(preset.serviceType||s)===s?"selected":""}>${s}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Subject</label>
+          <input type="text" id="amcNewTitleInput" name="subject" required placeholder="e.g. Kitchen cabinet hinge is loose" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;">
+        </div>
+        <div>
+          <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Describe your issue</label>
+          <textarea id="amcNewDescriptionInput" name="description" required placeholder="Any more detail that would help our technician…" style="width:100%;min-height:90px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;"></textarea>
+        </div>
+        <div>
+          <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Upload Images (optional, up to ${AMC_MAX_IMAGES})</label>
+          <input type="file" id="amcImagesInput" accept="image/*" multiple>
+          <div id="amcImagesPreview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;"></div>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:160px;">
+            <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Preferred Visit Date</label>
+            <input type="date" id="amcPreferredDateInput" name="preferredDate" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;">
           </div>
-          <div>
-            <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Description</label>
-            <textarea id="amcNewDescriptionInput" name="description" required placeholder="Any more detail that would help our technician…" style="width:100%;min-height:90px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;"></textarea>
-          </div>
-          <div>
-            <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Priority</label>
-            <select name="priority" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;">
-              ${AMC_PRIORITIES.map(pr=>`<option ${pr==="Normal"?"selected":""}>${pr}</option>`).join("")}
+          <div style="flex:1;min-width:160px;">
+            <label style="display:block;font-size:12.5px;color:var(--slate);margin-bottom:4px;">Preferred Time Slot</label>
+            <select id="amcPreferredTimeSelect" name="preferredTime" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:14px;">
+              <option value="">No preference</option>
+              ${AMC_TIME_SLOTS.map(s=>`<option>${s}</option>`).join("")}
             </select>
           </div>
-          <div id="amcNewFormError" style="display:none;color:var(--clay);font-size:13px;"></div>
-          <div style="display:flex;gap:10px;">
-            <button type="submit" class="btn">Submit Request</button>
-            <button type="button" class="btn ghost" id="amcCancelNewBtn">Cancel</button>
-          </div>
-        </form>
-      </div>`;
-  }
+        </div>
+        <div id="amcNewFormError" style="display:none;color:var(--clay);font-size:13px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button type="submit" class="btn">Submit Request</button>
+        </div>
+      </form>
+    </div>`;
+}
 
+// ---- Screen 4: My Support Requests (list + detail) ----
+function renderAmcList(p){
   const selected = state.amcSelectedId ? state.amcRequests.find(r=>r.id===state.amcSelectedId) : null;
   if(selected){
     return `
       <div class="portal-box" style="max-width:640px;">
-        <button type="button" class="back-link" id="amcBackToListBtn" style="margin-bottom:10px;">← All Requests</button>
+        <button type="button" class="back-link" id="amcBackToListBtn" style="margin-bottom:10px;background:none;border:none;cursor:pointer;">← All Requests</button>
         <h3>${escapeHtml(selected.title)}</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
           <span style="padding:4px 10px;border-radius:999px;background:${AMC_STATUS_COLORS[selected.status]||"var(--slate)"};color:#fff;font-size:12px;">${escapeHtml(selected.status)}</span>
-          <span style="padding:4px 10px;border-radius:999px;background:#eee;color:var(--ink);font-size:12px;">${escapeHtml(selected.priority)} priority</span>
+          <span style="padding:4px 10px;border-radius:999px;background:#eee;color:var(--ink);font-size:12px;">${escapeHtml(selected.serviceType||"General Service")}</span>
         </div>
         <div style="font-size:14px;line-height:1.6;margin-bottom:16px;white-space:pre-wrap;">${escapeHtml(selected.description)}</div>
+        ${(selected.images && selected.images.length) ? `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+          ${selected.images.map(img=>`<img src="${img}" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);">`).join("")}
+        </div>` : ""}
         <div class="portal-grid" style="margin-bottom:16px;">
           <div class="portal-box">
-            <h3>Service Date</h3>
-            <div class="big" style="font-size:16px;">${selected.serviceDate ? fmtDate(selected.serviceDate) + (selected.serviceTime ? " · " + fmtTime(selected.serviceTime) : "") : "Not yet scheduled"}</div>
+            <h3>Preferred Visit</h3>
+            <div class="big" style="font-size:15px;">${selected.preferredDate ? fmtDate(selected.preferredDate) : "No date given"}${selected.preferredTime ? " · " + escapeHtml(selected.preferredTime) : ""}</div>
+          </div>
+          <div class="portal-box">
+            <h3>Scheduled Visit</h3>
+            <div class="big" style="font-size:15px;">${selected.serviceDate ? fmtDate(selected.serviceDate) + (selected.serviceTime ? " · " + fmtTime(selected.serviceTime) : "") : "Not yet scheduled"}</div>
           </div>
           <div class="portal-box">
             <h3>Technician</h3>
-            <div class="big" style="font-size:16px;">${selected.technicianName ? escapeHtml(selected.technicianName) : "Not yet assigned"}</div>
+            <div class="big" style="font-size:15px;">${selected.technicianName ? escapeHtml(selected.technicianName) : "Not yet assigned"}</div>
           </div>
         </div>
-        <h3 style="margin-bottom:10px;">Comments</h3>
+        <h3 style="margin-bottom:10px;">Comments & Notes</h3>
         <div data-scroll-id="amc-comments" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:320px;overflow-y:auto;">
           ${(selected.comments && selected.comments.length)
             ? selected.comments.map(c=>`<div style="padding:9px 11px;border-radius:8px;background:${c.author==="client"?"#eef4ec":"#f4f2ee"};font-size:13.5px;">
-                <div style="font-weight:600;font-size:12px;color:var(--slate);margin-bottom:3px;">${c.author==="client"?"You":"Zynasty Studio"} · ${escapeHtml(fmtDate((c.at||"").slice(0,10)))} ${escapeHtml((c.at||"").slice(11,16))}</div>
+                <div style="font-weight:600;font-size:12px;color:var(--slate);margin-bottom:3px;">${c.author==="client"?"You":"Zynasty Studio"} · ${fmtAmcDateTime(c.at)}</div>
                 <div style="white-space:pre-wrap;">${escapeHtml(c.text||"")}</div>
               </div>`).join("")
             : `<div style="color:var(--slate);font-size:13.5px;">No comments yet.</div>`}
@@ -934,9 +1119,10 @@ function renderAmcSection(p){
   }
 
   return `
+    <button type="button" class="back-link" id="amcBackToHomeBtn" style="margin-bottom:14px;background:none;border:none;cursor:pointer;">← Back</button>
     <div class="portal-box" style="max-width:640px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
-        <h3 style="margin:0;">Service Requests</h3>
+        <h3 style="margin:0;">My Support Requests</h3>
         <button type="button" class="btn" id="amcNewRequestBtn">+ New Request</button>
       </div>
       ${state.amcRequests.length ? `
@@ -947,10 +1133,17 @@ function renderAmcSection(p){
                 <div style="font-weight:600;">${escapeHtml(r.title)}</div>
                 <span style="padding:3px 9px;border-radius:999px;background:${AMC_STATUS_COLORS[r.status]||"var(--slate)"};color:#fff;font-size:11.5px;">${escapeHtml(r.status)}</span>
               </div>
-              <div style="font-size:12.5px;color:var(--slate);margin-top:4px;">${escapeHtml(r.priority)} priority · Raised ${escapeHtml(fmtDate((r.createdAt||"").slice(0,10)))}${r.serviceDate ? " · Scheduled " + escapeHtml(fmtDate(r.serviceDate)) : ""}</div>
+              <div style="font-size:12.5px;color:var(--slate);margin-top:4px;">${escapeHtml(r.serviceType||"General Service")} · Raised ${escapeHtml(fmtDate((r.createdAt||"").slice(0,10)))}${r.serviceDate ? " · Scheduled " + escapeHtml(fmtDate(r.serviceDate)) : ""}</div>
             </button>`).join("")}
-        </div>` : `<div style="color:var(--slate);font-size:13.5px;">No service requests yet. If something needs attention, raise a request and our team will take it from there.</div>`}
+        </div>` : `<div class="empty" style="padding:24px 0;"><div>No service requests yet. If something needs attention, raise a request and our team will take it from there.</div></div>`}
     </div>`;
+}
+
+function renderAmcSection(p){
+  if(state.amcView === "plan") return renderAmcPlan(p);
+  if(state.amcView === "form") return renderAmcSupportForm(p);
+  if(state.amcView === "list") return renderAmcList(p);
+  return renderAmcHome(p);
 }
 
 function renderClient(){
@@ -1503,7 +1696,7 @@ function renderClient(){
         <div style="margin-top:14px;">
           ${state.clientView === "amc"
             ? `<button class="btn ghost" id="amcBackToProjectBtn" style="font-size:13px;padding:7px 14px;">← Back to Project</button>`
-            : `<button class="btn ghost" id="amcOpenBtn" style="font-size:13px;padding:7px 14px;">🔧 Request Maintenance${state.amcRequests.length ? ` (${state.amcRequests.length})` : ""}</button>`}
+            : `<button class="btn ghost" id="amcOpenBtn" style="font-size:13px;padding:7px 14px;">🛠️ Support & AMC${state.amcRequests.length ? ` (${state.amcRequests.length})` : ""}</button>`}
         </div>` : ""}
       </div>
       ${state.clientView === "amc" && p.status === "Completed" ? renderAmcSection(p) : (isLost ? lostContent : (isInDiscussion ? onboardingContent : (isOnboardingStage ? onboardingWizardContent : (isDesignPhase ? designWizardContent : laterContent))))}
@@ -1541,7 +1734,14 @@ async function lookupProjectByCode(code){
     state.clientFinalQuotationPdf = null;
     state.onboardingStep = null;
     state.productionStep = null;
+    state.clientView = "project";
+    state.amcView = "home";
     saveClientSession(code);
+    if(match.status === "Completed" && !match.handoverScreenSeen){
+      state.clientView = "amc";
+      match.handoverScreenSeen = true;
+      updateClientProject(code, { handoverScreenSeen: true }).catch(()=>{});
+    }
     render();
     await loadAmcRequests();
     try{
@@ -1570,41 +1770,137 @@ function attachClientHandlers(){
   if(back) back.onclick = ()=>{ state.clientResult=null; state.clientCode=""; state.clientError=""; state.clientQuotationPdf=null; state.clientFinalQuotationPdf=null; state.onboardingStep=null; state.designStep=null; state.productionStep=null; clearClientSession(); render(); };
 
   const amcOpenBtn = document.getElementById("amcOpenBtn");
-  if(amcOpenBtn) amcOpenBtn.onclick = ()=>{ state.clientView = "amc"; state.amcSelectedId = null; state.amcShowNewForm = false; render(); };
+  if(amcOpenBtn) amcOpenBtn.onclick = ()=>{ state.clientView = "amc"; state.amcView = "home"; state.amcSelectedId = null; state.amcFormPreset = null; render(); };
   const amcBackToProjectBtn = document.getElementById("amcBackToProjectBtn");
   if(amcBackToProjectBtn) amcBackToProjectBtn.onclick = ()=>{ state.clientView = "project"; render(); };
-  const amcNewRequestBtn = document.getElementById("amcNewRequestBtn");
-  if(amcNewRequestBtn) amcNewRequestBtn.onclick = ()=>{ state.amcShowNewForm = true; render(); };
-  const amcCancelNewBtn = document.getElementById("amcCancelNewBtn");
-  if(amcCancelNewBtn) amcCancelNewBtn.onclick = ()=>{ state.amcShowNewForm = false; render(); };
+
+  // Handover home screen navigation
+  const amcGoSupportBtn = document.getElementById("amcGoSupportBtn");
+  if(amcGoSupportBtn) amcGoSupportBtn.onclick = ()=>{ state.amcFormPreset = null; state.amcView = "form"; render(); };
+  const amcGoPlanBtn = document.getElementById("amcGoPlanBtn");
+  if(amcGoPlanBtn) amcGoPlanBtn.onclick = ()=>{ state.amcJustActivated = false; state.amcView = "plan"; render(); };
+  const amcGoListBtn = document.getElementById("amcGoListBtn");
+  if(amcGoListBtn) amcGoListBtn.onclick = ()=>{ state.amcSelectedId = null; state.amcView = "list"; render(); };
+  const amcBackToHomeBtn = document.getElementById("amcBackToHomeBtn");
+  if(amcBackToHomeBtn) amcBackToHomeBtn.onclick = ()=>{ state.amcView = "home"; state.amcSelectedId = null; render(); };
+
+  // AMC Plan page
+  const amcRequestServiceBtn = document.getElementById("amcRequestServiceBtn");
+  if(amcRequestServiceBtn) amcRequestServiceBtn.onclick = ()=>{
+    state.amcFormPreset = { amc: true, serviceType: "General Service" };
+    state.amcView = "form";
+    render();
+  };
+  const payAmcCashfreeBtn = document.getElementById("payAmcCashfreeBtn");
+  if(payAmcCashfreeBtn){
+    payAmcCashfreeBtn.onclick = async ()=>{
+      const errEl = document.getElementById("amcCashfreeErrorMsg");
+      if(errEl) errEl.style.display = "none";
+      if(!AMC_PLAN_AMOUNT || AMC_PLAN_AMOUNT <= 0){
+        if(errEl){ errEl.textContent = "AMC activation isn't available for online payment yet — please contact your designer."; errEl.style.display = "block"; }
+        return;
+      }
+      if(!cashfreeInstance){
+        if(errEl){ errEl.textContent = "Payment could not start — please check your internet connection and try again."; errEl.style.display = "block"; }
+        return;
+      }
+      const p = state.clientResult;
+      payAmcCashfreeBtn.disabled = true;
+      payAmcCashfreeBtn.textContent = "Starting payment…";
+      try{
+        const res = await fetch(`${CASHFREE_BACKEND_URL}/create-order`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: p.id,
+            amount: AMC_PLAN_AMOUNT,
+            customerName: formatClientName(p) || p.clientName || "Customer",
+            customerEmail: p.clientEmail || "",
+            customerPhone: p.clientPhone || ""
+          })
+        });
+        const data = await res.json();
+        if(!res.ok || !data.payment_session_id) throw new Error(data.message || "Could not start payment");
+        sessionStorage.setItem("zynastyCashfreeStage", "amc");
+        sessionStorage.setItem("zynastyCashfreeProjectCode", p.accessCode);
+        cashfreeInstance.checkout({ paymentSessionId: data.payment_session_id, redirectTarget: "_self" });
+      }catch(err){
+        console.error("Could not start AMC payment", err);
+        if(errEl){ errEl.textContent = "Could not start payment. Please try again."; errEl.style.display = "block"; }
+        payAmcCashfreeBtn.disabled = false;
+        payAmcCashfreeBtn.textContent = "Activate AMC Plan";
+      }
+    };
+  }
+
+  // Support Request form (shared by plain support & AMC service requests)
+  const amcImagesInput = document.getElementById("amcImagesInput");
+  let amcPendingImages = [];
+  if(amcImagesInput){
+    amcImagesInput.addEventListener("change", async ()=>{
+      const files = Array.from(amcImagesInput.files || []).slice(0, AMC_MAX_IMAGES);
+      const preview = document.getElementById("amcImagesPreview");
+      amcPendingImages = [];
+      if(preview) preview.innerHTML = "";
+      for(const file of files){
+        try{
+          const dataUrl = await compressImageFileForUpload(file);
+          amcPendingImages.push(dataUrl);
+          if(preview){
+            const img = document.createElement("img");
+            img.src = dataUrl;
+            img.style.cssText = "width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--line);";
+            preview.appendChild(img);
+          }
+        }catch(err){ console.error("Could not read image", err); }
+      }
+    });
+  }
   const amcNewForm = document.getElementById("amcNewForm");
   if(amcNewForm){
     amcNewForm.onsubmit = async (e)=>{
       e.preventDefault();
       const fd = new FormData(e.target);
-      const title = (fd.get("title")||"").trim();
+      const serviceType = fd.get("serviceType") || "General Service";
+      const subject = (fd.get("subject")||"").trim();
       const description = (fd.get("description")||"").trim();
-      const priority = fd.get("priority") || "Normal";
+      const preferredDate = fd.get("preferredDate") || "";
+      const preferredTime = fd.get("preferredTime") || "";
       const errEl = document.getElementById("amcNewFormError");
-      if(!title || !description){
-        errEl.textContent = "Please fill in both a title and a description.";
+      if(!subject || !description){
+        errEl.textContent = "Please fill in both a subject and a description.";
         errEl.style.display = "block";
         return;
       }
       const submitBtn = e.target.querySelector('button[type="submit"]');
       if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = "Submitting…"; }
-      const ok = await createAmcRequest(state.clientResult.accessCode, title, description, priority);
+      const p = state.clientResult;
+      const ok = await createAmcRequest(p.accessCode, {
+        subject, description,
+        priority: serviceType === "Breakdown Service" ? "Urgent" : "Normal",
+        serviceType, preferredDate, preferredTime,
+        images: amcPendingImages,
+        amcStatus: p.amcActive ? "Active" : "Not Active",
+        ticketId: newAmcTicketId()
+      });
       if(!ok){
         errEl.textContent = "Could not submit your request. Please try again.";
         errEl.style.display = "block";
         if(submitBtn){ submitBtn.disabled = false; submitBtn.textContent = "Submit Request"; }
         return;
       }
+      amcPendingImages = [];
       await loadAmcRequests();
-      state.amcShowNewForm = false;
+      state.amcFormPreset = null;
+      state.amcSelectedId = null;
+      state.amcView = "list";
       render();
     };
   }
+
+  // My Support Requests: list + detail
+  const amcNewRequestBtn = document.getElementById("amcNewRequestBtn");
+  if(amcNewRequestBtn) amcNewRequestBtn.onclick = ()=>{ state.amcFormPreset = null; state.amcView = "form"; render(); };
   document.querySelectorAll(".amc-ticket-row").forEach(row=>{
     row.addEventListener("click", ()=>{ state.amcSelectedId = row.dataset.id; render(); });
   });
@@ -2407,9 +2703,9 @@ function isRefreshUnsafe(){
   }
   if(step === "kyc") return !p.kycCompleted;
   // AMC section: don't refresh out from under someone mid-way through
-  // writing a comment or filling the new-request form.
+  // writing a comment or filling the support request form.
   if(state.clientView === "amc"){
-    if(state.amcShowNewForm) return true;
+    if(state.amcView === "form") return true;
     const commentInput = document.getElementById("amcCommentInput");
     if(commentInput && commentInput.value.trim()) return true;
   }
@@ -2466,6 +2762,9 @@ async function handleCashfreeReturn(){
   state.clientResult = p;
   if(cashfreeStage === "production"){
     state.productionStep = "payment";
+  } else if(cashfreeStage === "amc"){
+    state.clientView = "amc";
+    state.amcView = "plan";
   } else {
     state.onboardingStep = "payment";
   }
@@ -2484,6 +2783,21 @@ async function handleCashfreeReturn(){
           productionPaymentVerifiedAt: p.productionPaymentVerifiedAt,
           productionPaymentReferenceNote: p.productionPaymentReferenceNote
         });
+      } else if(cashfreeStage === "amc"){
+        const activatedAt = new Date();
+        const expiry = new Date(activatedAt);
+        expiry.setMonth(expiry.getMonth() + AMC_PLAN_VALIDITY_MONTHS);
+        p.amcActive = true;
+        p.amcPaymentId = orderId;
+        p.amcPaymentDate = activatedAt.toISOString();
+        p.amcExpiryDate = expiry.toISOString();
+        await updateClientProject(p.accessCode, {
+          amcActive: p.amcActive,
+          amcPaymentId: p.amcPaymentId,
+          amcPaymentDate: p.amcPaymentDate,
+          amcExpiryDate: p.amcExpiryDate
+        });
+        state.amcJustActivated = true;
       } else {
         p.paymentStatus = "verified";
         p.paymentVerifiedAt = new Date().toISOString();
