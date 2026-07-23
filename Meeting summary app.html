@@ -1,0 +1,3843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Meeting Assistant (Supabase + Storage + RPC)</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Material Icons -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel Standalone -->
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+
+  <!-- Emotion & MUI -->
+  <script src="https://cdn.jsdelivr.net/npm/@emotion/react@11.11.1/dist/emotion-react.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mui/material@5.14.20/umd/material-ui.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mui/icons-material@5.14.19/umd/material-ui-icons.production.min.js"></script>
+
+  <!-- Supabase JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html {
+      font-size: 16px;
+      scroll-behavior: smooth;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #f5f7fb;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #c1c7cd;
+      border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #a0a7af;
+    }
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(24px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    @keyframes pulse-ring {
+      0% {
+        transform: scale(1);
+        opacity: 0.6;
+      }
+      100% {
+        transform: scale(1.8);
+        opacity: 0;
+      }
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    .fade-in-up {
+      animation: fadeInUp 0.5s ease forwards;
+    }
+    .record-pulse::before {
+      content: '';
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.3);
+      animation: pulse-ring 1.8s ease-out infinite;
+    }
+    #root {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .loading-screen {
+      text-align: center;
+      color: #6C5CE7;
+    }
+    .loading-screen .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(108, 92, 231, 0.1);
+      border-top-color: #6C5CE7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    .dark-mode {
+      background: #0f1117;
+      color: #e8edf2;
+    }
+    .dark-mode .MuiPaper-root {
+      background: #1a1d27 !important;
+      border-color: #2a2d3a !important;
+    }
+    .dark-mode .MuiCard-root {
+      background: #1a1d27 !important;
+      border-color: #2a2d3a !important;
+    }
+    .dark-mode .MuiAppBar-root {
+      background: #141720 !important;
+    }
+    .dark-mode .MuiDrawer-paper {
+      background: #141720 !important;
+      border-color: #2a2d3a !important;
+    }
+    .dark-mode .MuiListItemButton-root:hover {
+      background: rgba(255, 255, 255, 0.05) !important;
+    }
+    .dark-mode .MuiInputBase-root {
+      color: #e8edf2 !important;
+    }
+    .dark-mode .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline {
+      border-color: #2a2d3a !important;
+    }
+    .dark-mode .MuiChip-root {
+      background: #2a2d3a !important;
+      color: #e8edf2 !important;
+    }
+    .fab-record {
+      box-shadow: 0 8px 32px rgba(239, 68, 68, 0.35) !important;
+      transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    }
+    .fab-record:hover {
+      transform: scale(1.05) !important;
+      box-shadow: 0 12px 40px rgba(239, 68, 68, 0.45) !important;
+    }
+    .meeting-card {
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .meeting-card:hover {
+      transform: translateY(-2px);
+    }
+    .transcript-scroll {
+      scroll-behavior: smooth;
+    }
+    .transcript-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+    .transcript-scroll::-webkit-scrollbar-thumb {
+      background: #c1c7cd;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="loading-screen">
+      <div class="spinner"></div>
+      <div>Loading AI Meeting Assistant...</div>
+    </div>
+  </div>
+
+  <script type="text/babel">
+    // ============================================================
+    //  IMPORTS
+    // ============================================================
+    const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext, useReducer } = React;
+    const { createRoot } = ReactDOM;
+
+    const {
+      ThemeProvider,
+      createTheme,
+      CssBaseline,
+      Box,
+      AppBar,
+      Toolbar,
+      Typography,
+      IconButton,
+      Drawer,
+      List,
+      ListItem,
+      ListItemButton,
+      ListItemIcon,
+      ListItemText,
+      Card,
+      CardContent,
+      Button,
+      Fab,
+      Chip,
+      TextField,
+      InputAdornment,
+      Avatar,
+      Divider,
+      Paper,
+      Grid,
+      Stack,
+      CircularProgress,
+      LinearProgress,
+      Tabs,
+      Tab,
+      MenuItem,
+      Dialog,
+      DialogTitle,
+      DialogContent,
+      DialogActions,
+      Snackbar,
+      Alert,
+      Switch,
+      FormControlLabel,
+      Select,
+      FormControl,
+      InputLabel,
+      useTheme,
+      alpha,
+      Checkbox,
+      Tooltip,
+      Fade,
+      Zoom,
+      Badge,
+      IconButton as MuiIconButton,
+      Input,
+      OutlinedInput,
+      FormHelperText,
+    } = window['@mui/material'];
+
+    const { responsiveFontSizes } = window['@mui/material/styles'];
+
+    const icons = window['@mui/icons-material'];
+    const {
+      Dashboard: DashboardIcon,
+      Mic: MicIcon,
+      History: HistoryIcon,
+      Settings: SettingsIcon,
+      Description: DescriptionIcon,
+      Search: SearchIcon,
+      PlayArrow: PlayArrowIcon,
+      Pause: PauseIcon,
+      Stop: StopIcon,
+      CheckCircle: CheckCircleIcon,
+      Timer: TimerIcon,
+      MeetingRoom: MeetingRoomIcon,
+      Today: TodayIcon,
+      Checklist: ChecklistIcon,
+      Save: SaveIcon,
+      Summarize: SummarizeIcon,
+      AutoAwesome: AutoAwesomeIcon,
+      Close: CloseIcon,
+      Menu: MenuIcon,
+      Notifications: NotificationsIcon,
+      Person: PersonIcon,
+      Business: BusinessIcon,
+      EventNote: EventNoteIcon,
+      ContentCopy: ContentCopyIcon,
+      FileDownload: FileDownloadIcon,
+      Delete: DeleteIcon,
+      Share: ShareIcon,
+      ExpandLess: ExpandLessIcon,
+      ExpandMore: ExpandMoreIcon,
+      ArrowBack: ArrowBackIcon,
+      Launch: LaunchIcon,
+      MoreVert: MoreVertIcon,
+      CloudUpload: CloudUploadIcon,
+      GraphicEq: GraphicEqIcon,
+      RecordVoiceOver: RecordVoiceOverIcon,
+      SmartToy: SmartToyIcon,
+      Psychology: PsychologyIcon,
+      LightMode: LightModeIcon,
+      DarkMode: DarkModeIcon,
+      Download: DownloadIcon,
+      Upload: UploadIcon,
+      OpenInNew: OpenInNewIcon,
+      Link: LinkIcon,
+      WhatsApp: WhatsAppIcon,
+      Email: EmailIcon,
+      Telegram: TelegramIcon,
+      Send: SendIcon,
+      Warning: WarningIcon,
+      Info: InfoIcon,
+      Error: ErrorIcon,
+      Verified: VerifiedIcon,
+      Flag: FlagIcon,
+      Schedule: ScheduleIcon,
+      Groups: GroupsIcon,
+      Chat: ChatIcon,
+      ListAlt: ListAltIcon,
+    } = icons;
+
+    const COLORS = {
+      primary: '#6C5CE7',
+      primaryLight: '#A29BFE',
+      primaryDark: '#4A3DBF',
+      secondary: '#00CEC9',
+      accent: '#FD79A8',
+      success: '#00B894',
+      warning: '#FDCB6E',
+      error: '#E17055',
+      info: '#74B9FF',
+      gradient: 'linear-gradient(135deg, #6C5CE7 0%, #A29BFE 100%)',
+      gradientWarm: 'linear-gradient(135deg, #FD79A8 0%, #FDCB6E 100%)',
+    };
+
+    const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const formatTime = (seconds) => {
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    };
+    const formatDuration = (seconds) => {
+      if (!seconds || seconds < 60) return formatTime(seconds);
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      if (h > 0) return `${h}h ${m}m ${s}s`;
+      return `${m}m ${s}s`;
+    };
+    const formatDate = (ts) => {
+      const d = new Date(ts);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    };
+    const formatTime12 = (ts) => {
+      const d = new Date(ts);
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    };
+    const formatDateTime = (ts) => `${formatDate(ts)} at ${formatTime12(ts)}`;
+    const truncate = (str, n = 60) => str?.length > n ? str.slice(0, n) + '…' : str;
+
+    // ============================================================
+    //  RECORDING SERVICE
+    // ============================================================
+    class RecordingService {
+      constructor() {
+        this.mediaRecorder = null;
+        this.audioChunks = [];
+        this.stream = null;
+        this.isRecording = false;
+        this.isPaused = false;
+        this.startTime = null;
+        this.pausedTime = 0;
+        this.timerInterval = null;
+        this.onDataAvailable = null;
+        this.onStop = null;
+        this.onTimerUpdate = null;
+        this.audioContext = null;
+        this.analyser = null;
+        this.volumeInterval = null;
+      }
+
+      async start() {
+        try {
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
+          });
+          this.audioContext = new(window.AudioContext || window.webkitAudioContext)();
+          this.analyser = this.audioContext.createAnalyser();
+          this.analyser.fftSize = 256;
+          const source = this.audioContext.createMediaStreamSource(this.stream);
+          source.connect(this.analyser);
+
+          this.mediaRecorder = new MediaRecorder(this.stream);
+          this.audioChunks = [];
+          this.mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+              this.audioChunks.push(e.data);
+              if (this.onDataAvailable) this.onDataAvailable(e.data);
+            }
+          };
+          this.mediaRecorder.onstop = () => {
+            const blob = new Blob(this.audioChunks, { type: 'audio/webm' });
+            if (this.onStop) this.onStop(blob);
+            this.isRecording = false;
+            this.isPaused = false;
+            if (this.timerInterval) clearInterval(this.timerInterval);
+            if (this.volumeInterval) clearInterval(this.volumeInterval);
+          };
+          this.mediaRecorder.start(1000);
+          this.isRecording = true;
+          this.isPaused = false;
+          this.startTime = Date.now();
+          this.pausedTime = 0;
+
+          this.timerInterval = setInterval(() => {
+            if (this.onTimerUpdate && !this.isPaused) {
+              const elapsed = (Date.now() - this.startTime - this.pausedTime) / 1000;
+              this.onTimerUpdate(elapsed);
+            }
+          }, 100);
+          this.volumeInterval = setInterval(() => {
+            if (this.analyser && this.onTimerUpdate) {
+              const data = new Uint8Array(this.analyser.frequencyBinCount);
+              this.analyser.getByteFrequencyData(data);
+              const avg = data.reduce((a, b) => a + b, 0) / data.length;
+              const vol = Math.min(1, avg / 128);
+              this.onTimerUpdate(null, vol);
+            }
+          }, 100);
+          return true;
+        } catch (err) {
+          throw err;
+        }
+      }
+
+      pause() {
+        if (this.isRecording && !this.isPaused && this.mediaRecorder) {
+          this.mediaRecorder.pause();
+          this.isPaused = true;
+          this.pausedTime += Date.now() - this.startTime - this.pausedTime;
+          return true;
+        }
+        return false;
+      }
+
+      resume() {
+        if (this.isRecording && this.isPaused && this.mediaRecorder) {
+          this.mediaRecorder.resume();
+          this.isPaused = false;
+          this.startTime = Date.now();
+          return true;
+        }
+        return false;
+      }
+
+      stop() {
+        if (this.mediaRecorder && this.isRecording) {
+          this.mediaRecorder.stop();
+          this.isRecording = false;
+          if (this.timerInterval) clearInterval(this.timerInterval);
+          if (this.volumeInterval) clearInterval(this.volumeInterval);
+          if (this.stream) {
+            this.stream.getTracks().forEach(track => track.stop());
+            this.stream = null;
+          }
+          if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
+          }
+          return true;
+        }
+        return false;
+      }
+
+      getDuration() {
+        if (!this.startTime) return 0;
+        const elapsed = (Date.now() - this.startTime - this.pausedTime) / 1000;
+        return Math.max(0, elapsed);
+      }
+
+      getStatus() {
+        if (this.isRecording && this.isPaused) return 'paused';
+        if (this.isRecording) return 'recording';
+        return 'idle';
+      }
+
+      getAudioBlob() {
+        if (this.audioChunks.length === 0) return null;
+        return new Blob(this.audioChunks, { type: 'audio/webm' });
+      }
+    }
+
+    // ============================================================
+    //  TRANSCRIPTION SERVICE
+    // ============================================================
+    class TranscriptionService {
+      constructor() {
+        this.recognition = null;
+        this.isListening = false;
+        this.finalTranscript = '';
+        this.interimTranscript = '';
+        this.onResult = null;
+        this.onEnd = null;
+        this.segments = [];
+        this.speakerCount = 0;
+        this.segmentStartTime = 0;
+        this.lastFinalText = '';
+      }
+
+      start() {
+        return new Promise((resolve, reject) => {
+          try {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+              reject(new Error('Speech recognition not supported'));
+              return;
+            }
+            this.recognition = new SpeechRecognition();
+            this.recognition.continuous = true;
+            this.recognition.interimResults = true;
+            this.recognition.lang = 'en-US';
+            this.recognition.maxAlternatives = 1;
+
+            this.finalTranscript = '';
+            this.interimTranscript = '';
+            this.segments = [];
+            this.speakerCount = 0;
+            this.segmentStartTime = 0;
+            this.lastFinalText = '';
+
+            this.recognition.onresult = (e) => {
+              let interim = '';
+              let final = '';
+              for (let i = e.resultIndex; i < e.results.length; i++) {
+                const result = e.results[i];
+                const transcript = result[0].transcript;
+                if (result.isFinal) {
+                  final += transcript + ' ';
+                  if (this.segmentStartTime === 0) this.segmentStartTime = Date.now();
+                  const words = transcript.split(/\s+/);
+                  if (words.length > 2 && transcript.trim().length > 3) {
+                    const speakerId = (this.speakerCount % 2) + 1;
+                    this.speakerCount++;
+                    this.segments.push({
+                      speaker: `Speaker ${speakerId}`,
+                      text: transcript.trim(),
+                      timestamp: (Date.now() - this.segmentStartTime) / 1000,
+                    });
+                  }
+                  this.lastFinalText = transcript;
+                } else {
+                  interim += transcript;
+                }
+              }
+              this.finalTranscript += final;
+              this.interimTranscript = interim;
+              if (this.onResult) {
+                this.onResult({
+                  final: this.finalTranscript,
+                  interim: this.interimTranscript,
+                  segments: this.segments,
+                });
+              }
+            };
+
+            this.recognition.onerror = (e) => {
+              console.warn('Speech recognition error:', e.error);
+              if (e.error === 'not-allowed') reject(new Error('Microphone permission denied'));
+              if (this.onEnd) {
+                this.onEnd({ final: this.finalTranscript, segments: this.segments });
+              }
+            };
+
+            this.recognition.onend = () => {
+              this.isListening = false;
+              if (this.onEnd) {
+                this.onEnd({ final: this.finalTranscript, segments: this.segments });
+              }
+            };
+
+            this.recognition.start();
+            this.isListening = true;
+            this.segmentStartTime = Date.now();
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+
+      stop() {
+        if (this.recognition && this.isListening) {
+          this.recognition.stop();
+          this.isListening = false;
+          return { final: this.finalTranscript, segments: this.segments };
+        }
+        return { final: this.finalTranscript || 'No speech detected.', segments: this.segments };
+      }
+
+      isSupported() {
+        return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+      }
+    }
+
+    // ============================================================
+    //  GEMINI SERVICE
+    // ============================================================
+    class GeminiService {
+      constructor(apiKey) {
+        this.apiKey = apiKey;
+        this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+      }
+
+      async generateSummary(transcript, title) {
+        if (!this.apiKey) throw new Error('Gemini API key not set.');
+        const prompt = `
+          You are an AI meeting assistant. Analyze the following meeting transcript and generate a structured JSON summary with the following fields. Return ONLY valid JSON, no extra text.
+
+          Transcript:
+          ${transcript}
+
+          Meeting Title (infer from content): ${title || ''}
+
+          Generate JSON with these fields (use empty arrays or null for missing data):
+          {
+            "title": "Inferred meeting title",
+            "executiveSummary": "Brief executive summary (2-3 sentences)",
+            "keyPoints": ["Key point 1", "Key point 2"],
+            "decisions": ["Decision 1"],
+            "actionItems": [{"description": "Action item", "priority": "High/Medium/Low", "assignee": "Name", "dueDate": "YYYY-MM-DD"}],
+            "pendingTasks": [{"description": "Task", "priority": "High/Medium/Low", "assignee": "Name", "dueDate": "YYYY-MM-DD"}],
+            "deadlines": ["Deadline 1"],
+            "budget": "Budget amount mentioned or null",
+            "people": ["Name 1"],
+            "companies": ["Company 1"],
+            "questions": ["Question 1"],
+            "risks": ["Risk 1"],
+            "nextSteps": ["Step 1"],
+            "followUpAgenda": ["Agenda item 1"],
+            "sentiment": "Positive/Neutral/Negative",
+            "tags": ["tag1", "tag2"],
+            "bulletNotes": ["Bullet note 1"],
+            "detailedNotes": "Detailed meeting notes (paragraph)",
+            "oneMinuteSummary": "Very brief 1-minute summary",
+            "emailSummary": "Email-ready summary (plain text, with subject line)",
+            "whatsappSummary": "WhatsApp-ready summary (plain text)",
+            "clientSummary": "Client-friendly summary (plain text)",
+            "importantMoments": ["Moment 1"]
+          }
+
+          Ensure all fields are present. For actionItems and pendingTasks, try to infer assignees and due dates.
+          Use null for any field that cannot be determined.
+        `;
+
+        const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 2048, topK: 1, topP: 1 },
+          }),
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Gemini API error (${response.status}): ${text}`);
+        }
+        const data = await response.json();
+        const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const jsonMatch = generatedText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error('Could not parse JSON from Gemini response');
+        const result = JSON.parse(jsonMatch[0]);
+        const defaults = {
+          title: '',
+          executiveSummary: '',
+          keyPoints: [],
+          decisions: [],
+          actionItems: [],
+          pendingTasks: [],
+          deadlines: [],
+          budget: null,
+          people: [],
+          companies: [],
+          questions: [],
+          risks: [],
+          nextSteps: [],
+          followUpAgenda: [],
+          sentiment: 'Neutral',
+          tags: [],
+          bulletNotes: [],
+          detailedNotes: '',
+          oneMinuteSummary: '',
+          emailSummary: '',
+          whatsappSummary: '',
+          clientSummary: '',
+          importantMoments: [],
+        };
+        const merged = { ...defaults, ...result };
+        ['keyPoints', 'decisions', 'actionItems', 'pendingTasks', 'deadlines', 'people', 'companies', 'questions', 'risks', 'nextSteps', 'followUpAgenda', 'tags', 'bulletNotes', 'importantMoments'].forEach(key => {
+          if (!Array.isArray(merged[key])) merged[key] = [];
+        });
+        merged.actionItems = merged.actionItems.map(item => ({ ...item, id: generateId(), completed: false }));
+        merged.pendingTasks = merged.pendingTasks.map(item => ({ ...item, id: generateId(), completed: false }));
+        return merged;
+      }
+    }
+
+    // ============================================================
+    //  STORAGE ADAPTER (Supabase + IndexedDB + Storage + RPC)
+    // ============================================================
+    class StorageAdapter {
+      constructor(supabaseUrl, supabaseAnonKey, bucketName) {
+        this.useSupabase = !!(supabaseUrl && supabaseAnonKey);
+        this.bucketName = bucketName || 'zynasty.storage';
+        if (this.useSupabase) {
+          this.supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+          this.tables = {
+            meetings: 'meetings',
+            transcripts: 'transcripts',
+            summaries: 'summaries',
+            actionItems: 'action_items',
+            settings: 'settings',
+          };
+        } else {
+          this.dbName = 'AIMeetingAssistant';
+          this.version = 2;
+          this.db = null;
+        }
+      }
+
+      async init() {
+        if (this.useSupabase) {
+          try {
+            const { error } = await this.supabase.from(this.tables.meetings).select('id').limit(1);
+            if (error) throw error;
+            return true;
+          } catch (e) {
+            console.warn('Supabase connection failed, falling back to IndexedDB', e);
+            this.useSupabase = false;
+            return this.initIndexedDB();
+          }
+        } else {
+          return this.initIndexedDB();
+        }
+      }
+
+      initIndexedDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(this.dbName, this.version);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('meetings')) {
+              const store = db.createObjectStore('meetings', { keyPath: 'id' });
+              store.createIndex('date', 'date');
+              store.createIndex('title', 'title');
+            }
+            if (!db.objectStoreNames.contains('transcripts')) {
+              db.createObjectStore('transcripts', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('summaries')) {
+              db.createObjectStore('summaries', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('actionItems')) {
+              db.createObjectStore('actionItems', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('settings')) {
+              db.createObjectStore('settings', { keyPath: 'key' });
+            }
+          };
+          req.onsuccess = (e) => {
+            this.db = e.target.result;
+            resolve(true);
+          };
+          req.onerror = (e) => reject(e.target.error);
+        });
+      }
+
+      async put(store, data) {
+        if (this.useSupabase) {
+          const table = this.tables[store];
+          const { error } = await this.supabase.from(table).upsert(data);
+          if (error) throw error;
+          return data;
+        } else {
+          return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(store, 'readwrite');
+            const req = tx.objectStore(store).put(data);
+            req.onsuccess = () => resolve(data);
+            req.onerror = () => reject(req.error);
+          });
+        }
+      }
+
+      async get(store, id) {
+        if (this.useSupabase) {
+          const table = this.tables[store];
+          const { data, error } = await this.supabase.from(table).select('*').eq('id', id).single();
+          if (error) {
+            if (error.code === 'PGRST116') return null;
+            throw error;
+          }
+          return data;
+        } else {
+          return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(store, 'readonly');
+            const req = tx.objectStore(store).get(id);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+        }
+      }
+
+      async getAll(store, index = null, value = null) {
+        if (this.useSupabase) {
+          const table = this.tables[store];
+          let query = this.supabase.from(table).select('*');
+          if (index && value !== null) query = query.eq(index, value);
+          const { data, error } = await query;
+          if (error) throw error;
+          return data || [];
+        } else {
+          return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(store, 'readonly');
+            const req = tx.objectStore(store).getAll();
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+        }
+      }
+
+      async delete(store, id) {
+        if (this.useSupabase) {
+          const table = this.tables[store];
+          const { error } = await this.supabase.from(table).delete().eq('id', id);
+          if (error) throw error;
+        } else {
+          return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(store, 'readwrite');
+            const req = tx.objectStore(store).delete(id);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+          });
+        }
+      }
+
+      async deleteAll(store) {
+        if (this.useSupabase) {
+          const table = this.tables[store];
+          const { error } = await this.supabase.from(table).delete().neq('id', '');
+          if (error) throw error;
+        } else {
+          return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(store, 'readwrite');
+            const req = tx.objectStore(store).clear();
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+          });
+        }
+      }
+
+      async getByIndex(store, index, value) {
+        if (this.useSupabase) {
+          const table = this.tables[store];
+          const { data, error } = await this.supabase.from(table).select('*').eq(index, value);
+          if (error) throw error;
+          return data || [];
+        } else {
+          const all = await this.getAll(store);
+          return all.filter(item => item[index] === value);
+        }
+      }
+
+      async uploadAudio(meetingId, blob) {
+        if (!this.useSupabase) {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+        const filePath = `meetings/${meetingId}/audio.webm`;
+        const { error } = await this.supabase.storage.from(this.bucketName).upload(filePath, blob, {
+          contentType: 'audio/webm',
+          cacheControl: '3600',
+          upsert: true,
+        });
+        if (error) throw error;
+        const { data } = this.supabase.storage.from(this.bucketName).getPublicUrl(filePath);
+        return data.publicUrl;
+      }
+
+      async searchMeetings(query) {
+        if (!this.useSupabase) {
+          const all = await this.getAll('meetings');
+          const q = query.toLowerCase();
+          return all.filter(m =>
+            m.title?.toLowerCase().includes(q) ||
+            m.transcript?.toLowerCase().includes(q) ||
+            (m.tags || []).some(t => t.toLowerCase().includes(q)) ||
+            (m.people || []).some(p => p.toLowerCase().includes(q)) ||
+            (m.companies || []).some(c => c.toLowerCase().includes(q))
+          );
+        }
+        const { data, error } = await this.supabase.rpc('search_meetings', { search_query: query });
+        if (error) throw error;
+        const ids = data.map(d => d.id);
+        if (ids.length === 0) return [];
+        const { data: meetings, error: err2 } = await this.supabase.from(this.tables.meetings).select('*').in('id', ids);
+        if (err2) throw err2;
+        const rankMap = {};
+        data.forEach(d => { rankMap[d.id] = d.rank; });
+        meetings.sort((a, b) => (rankMap[b.id] || 0) - (rankMap[a.id] || 0));
+        return meetings;
+      }
+    }
+
+    // ============================================================
+    //  CONTEXT
+    // ============================================================
+    const AppContext = createContext();
+
+    const appReducer = (state, action) => {
+      switch (action.type) {
+        case 'SET_MEETINGS':
+          return { ...state, meetings: action.payload };
+        case 'ADD_MEETING':
+          return { ...state, meetings: [action.payload, ...state.meetings] };
+        case 'UPDATE_MEETING':
+          return {
+            ...state,
+            meetings: state.meetings.map(m => m.id === action.payload.id ? action.payload : m)
+          };
+        case 'DELETE_MEETING':
+          return { ...state, meetings: state.meetings.filter(m => m.id !== action.payload) };
+        case 'SET_VIEW':
+          return { ...state, view: action.payload };
+        case 'SET_CURRENT_MEETING':
+          return { ...state, currentMeetingId: action.payload };
+        case 'SET_DARK_MODE':
+          return { ...state, darkMode: action.payload };
+        case 'SET_SNACKBAR':
+          return { ...state, snackbar: { ...state.snackbar, ...action.payload, open: true } };
+        case 'CLOSE_SNACKBAR':
+          return { ...state, snackbar: { ...state.snackbar, open: false } };
+        case 'SET_SETTINGS':
+          return { ...state, settings: { ...state.settings, ...action.payload } };
+        case 'SET_SEARCH_RESULTS':
+          return { ...state, searchResults: action.payload };
+        case 'SET_SEARCH_QUERY':
+          return { ...state, searchQuery: action.payload };
+        default:
+          return state;
+      }
+    };
+
+    const initialState = {
+      meetings: [],
+      darkMode: false,
+      currentMeetingId: null,
+      view: 'dashboard',
+      snackbar: { open: false, message: '', severity: 'info' },
+      searchQuery: '',
+      searchResults: [],
+      settings: {
+        language: 'en-US',
+        aiModel: 'gemini-flash',
+        geminiApiKey: '',
+        supabaseUrl: '',
+        supabaseAnonKey: '',
+        storageBucket: 'zynasty.storage',
+      },
+    };
+
+    // ============================================================
+    //  APP PROVIDER
+    // ============================================================
+    const AppProvider = ({ children }) => {
+      const [state, dispatch] = useReducer(appReducer, initialState);
+      const [initialized, setInitialized] = useState(false);
+      const storageRef = useRef(null);
+      const geminiServiceRef = useRef(null);
+
+      useEffect(() => {
+        let isMounted = true;
+        let timeoutId = null;
+
+        const init = async () => {
+          try {
+            let settings = state.settings;
+            const saved = localStorage.getItem('aiMeetingSettings');
+            if (saved) {
+              try {
+                const parsed = JSON.parse(saved);
+                settings = { ...settings, ...parsed };
+                dispatch({ type: 'SET_SETTINGS', payload: settings });
+              } catch (e) {}
+            }
+
+            const adapter = new StorageAdapter(settings.supabaseUrl, settings.supabaseAnonKey, settings.storageBucket);
+            await adapter.init();
+            storageRef.current = adapter;
+
+            let meetings = await adapter.getAll('meetings');
+            meetings = meetings.sort((a, b) => (b.date || 0) - (a.date || 0));
+            if (isMounted) dispatch({ type: 'SET_MEETINGS', payload: meetings });
+
+            const storedSettings = await adapter.get('settings', 'appSettings');
+            if (storedSettings && isMounted) {
+              const merged = { ...settings, ...storedSettings };
+              dispatch({ type: 'SET_SETTINGS', payload: merged });
+              settings = merged;
+              localStorage.setItem('aiMeetingSettings', JSON.stringify(merged));
+            }
+
+            if (settings.geminiApiKey) {
+              geminiServiceRef.current = new GeminiService(settings.geminiApiKey);
+            }
+
+            if (isMounted) setInitialized(true);
+          } catch (err) {
+            console.error('Init error:', err);
+            if (isMounted) {
+              setInitialized(true);
+              dispatch({
+                type: 'SET_SNACKBAR',
+                payload: { message: 'Storage init error: ' + err.message, severity: 'error' }
+              });
+            }
+          }
+        };
+
+        init();
+        timeoutId = setTimeout(() => {
+          if (isMounted && !initialized) {
+            console.warn('Init timed out, forcing render');
+            setInitialized(true);
+          }
+        }, 3000);
+
+        return () => {
+          isMounted = false;
+          if (timeoutId) clearTimeout(timeoutId);
+        };
+      }, []);
+
+      useEffect(() => {
+        if (!storageRef.current) return;
+        const saveSettings = async () => {
+          try {
+            await storageRef.current.put('settings', { key: 'appSettings', ...state.settings });
+            localStorage.setItem('aiMeetingSettings', JSON.stringify(state.settings));
+            if (state.settings.geminiApiKey) {
+              geminiServiceRef.current = new GeminiService(state.settings.geminiApiKey);
+            } else {
+              geminiServiceRef.current = null;
+            }
+            const adapter = new StorageAdapter(
+              state.settings.supabaseUrl,
+              state.settings.supabaseAnonKey,
+              state.settings.storageBucket
+            );
+            await adapter.init();
+            storageRef.current = adapter;
+          } catch (e) {
+            console.error('Error saving settings:', e);
+          }
+        };
+        saveSettings();
+      }, [state.settings]);
+
+      const addMeeting = async (meeting) => {
+        const adapter = storageRef.current;
+        if (!adapter) throw new Error('Storage not initialized');
+        await adapter.put('meetings', meeting);
+        dispatch({ type: 'ADD_MEETING', payload: meeting });
+        return meeting;
+      };
+
+      const updateMeeting = async (meeting) => {
+        const adapter = storageRef.current;
+        if (!adapter) throw new Error('Storage not initialized');
+        await adapter.put('meetings', meeting);
+        dispatch({ type: 'UPDATE_MEETING', payload: meeting });
+        return meeting;
+      };
+
+      const deleteMeeting = async (id) => {
+        const adapter = storageRef.current;
+        if (!adapter) throw new Error('Storage not initialized');
+        await adapter.delete('meetings', id);
+        await adapter.deleteAll('transcripts');
+        await adapter.deleteAll('summaries');
+        await adapter.deleteAll('actionItems');
+        dispatch({ type: 'DELETE_MEETING', payload: id });
+      };
+
+      const getMeeting = async (id) => {
+        const adapter = storageRef.current;
+        if (!adapter) return null;
+        return await adapter.get('meetings', id);
+      };
+
+      const generateSummary = async (transcript, title) => {
+        if (!geminiServiceRef.current) {
+          throw new Error('Gemini API key not configured. Please add your API key in Settings.');
+        }
+        return await geminiServiceRef.current.generateSummary(transcript, title);
+      };
+
+      const saveTranscript = async (meetingId, transcript) => {
+        const adapter = storageRef.current;
+        if (!adapter) throw new Error('Storage not initialized');
+        const data = { id: generateId(), meetingId, text: transcript, updated: Date.now() };
+        await adapter.put('transcripts', data);
+        return data;
+      };
+
+      const saveSummary = async (meetingId, summary) => {
+        const adapter = storageRef.current;
+        if (!adapter) throw new Error('Storage not initialized');
+        const data = { id: generateId(), meetingId, data: summary, updated: Date.now() };
+        await adapter.put('summaries', data);
+        return data;
+      };
+
+      const saveActionItems = async (meetingId, items) => {
+        const adapter = storageRef.current;
+        if (!adapter) throw new Error('Storage not initialized');
+        const data = items.map(item => ({
+          ...item,
+          id: item.id || generateId(),
+          meetingId,
+          updated: Date.now(),
+        }));
+        for (const d of data) await adapter.put('actionItems', d);
+        return data;
+      };
+
+      const getActionItems = async (meetingId) => {
+        const adapter = storageRef.current;
+        if (!adapter) return [];
+        return await adapter.getByIndex('actionItems', 'meetingId', meetingId);
+      };
+
+      const uploadAudio = async (meetingId, blob) => {
+        const adapter = storageRef.current;
+        if (!adapter) throw new Error('Storage not initialized');
+        return await adapter.uploadAudio(meetingId, blob);
+      };
+
+      const searchMeetings = async (query) => {
+        const adapter = storageRef.current;
+        if (!adapter) return [];
+        const results = await adapter.searchMeetings(query);
+        dispatch({ type: 'SET_SEARCH_RESULTS', payload: results });
+        return results;
+      };
+
+      const value = {
+        state,
+        dispatch,
+        addMeeting,
+        updateMeeting,
+        deleteMeeting,
+        getMeeting,
+        generateSummary,
+        saveTranscript,
+        saveSummary,
+        saveActionItems,
+        getActionItems,
+        uploadAudio,
+        searchMeetings,
+        initialized,
+      };
+
+      return React.createElement(AppContext.Provider, { value }, children);
+    };
+
+    const useApp = () => useContext(AppContext);
+
+    // ============================================================
+    //  LAYOUT COMPONENT
+    // ============================================================
+    const Layout = ({ children }) => {
+      const { state, dispatch } = useApp();
+      const theme = useTheme();
+      const [mobileOpen, setMobileOpen] = useState(false);
+      const [drawerOpen, setDrawerOpen] = useState(true);
+
+      const toggleDrawer = () => {
+        if (window.innerWidth < 768) {
+          setMobileOpen(!mobileOpen);
+        } else {
+          setDrawerOpen(!drawerOpen);
+        }
+      };
+
+      const navItems = [
+        { id: 'dashboard', label: 'Dashboard', icon: React.createElement(DashboardIcon) },
+        { id: 'new', label: 'New Meeting', icon: React.createElement(MicIcon) },
+        { id: 'history', label: 'Meetings', icon: React.createElement(HistoryIcon) },
+        { id: 'search', label: 'Search', icon: React.createElement(SearchIcon) },
+        { id: 'settings', label: 'Settings', icon: React.createElement(SettingsIcon) },
+      ];
+
+      const drawerContent = React.createElement(
+        Box, { sx: { width: 260, py: 2, px: 1.5, height: '100%', display: 'flex', flexDirection: 'column' } },
+        React.createElement(
+          Box, { sx: { px: 1.5, mb: 3, display: 'flex', alignItems: 'center', gap: 1.5 } },
+          React.createElement(
+            Box, {
+              sx: {
+                width: 40,
+                height: 40,
+                borderRadius: '12px',
+                background: COLORS.gradient,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }
+            },
+            React.createElement(MicIcon, { sx: { color: '#fff', fontSize: 22 } })
+          ),
+          React.createElement(
+            Typography, { variant: 'h6', fontWeight: 700, sx: { letterSpacing: '-0.5px' } },
+            'AI Meeting',
+            React.createElement(Typography, { component: 'span', fontWeight: 400, color: 'text.secondary', sx: { display: 'block', fontSize: '0.75rem' } }, 'Assistant')
+          )
+        ),
+        React.createElement(
+          List, { sx: { flex: 1, px: 0 } },
+          navItems.map((item) => {
+            const isActive = state.view === item.id;
+            return React.createElement(
+              ListItem, { key: item.id, disablePadding: true },
+              React.createElement(
+                ListItemButton, {
+                  onClick: () => {
+                    dispatch({ type: 'SET_VIEW', payload: item.id });
+                    if (window.innerWidth < 768) setMobileOpen(false);
+                  },
+                  selected: isActive,
+                  sx: {
+                    borderRadius: '12px',
+                    mb: 0.5,
+                    '&.Mui-selected': {
+                      background: COLORS.gradient,
+                      color: '#fff',
+                      '& .MuiListItemIcon-root': { color: '#fff' },
+                      '&:hover': { background: COLORS.gradient }
+                    },
+                    '&:hover': {
+                      background: alpha(theme.palette.primary.main, 0.06)
+                    }
+                  }
+                },
+                React.createElement(ListItemIcon, { sx: { minWidth: 40, color: isActive ? '#fff' : 'text.secondary' } }, item.icon),
+                React.createElement(ListItemText, {
+                  primary: item.label,
+                  primaryTypographyProps: { fontWeight: isActive ? 600 : 400, fontSize: '0.9rem' }
+                })
+              )
+            );
+          })
+        ),
+        React.createElement(
+          Box, { sx: { px: 1.5, pt: 2, borderTop: '1px solid', borderColor: 'divider' } },
+          React.createElement(
+            FormControlLabel, {
+              control: React.createElement(Switch, {
+                checked: state.darkMode,
+                onChange: (e) => {
+                  dispatch({ type: 'SET_DARK_MODE', payload: e.target.checked });
+                },
+                size: 'small'
+              }),
+              label: React.createElement(Typography, { variant: 'caption', color: 'text.secondary' },
+                state.darkMode ? 'Dark Mode' : 'Light Mode')
+            }
+          ),
+          React.createElement(
+            Typography, { variant: 'caption', color: 'text.secondary', sx: { display: 'block', mt: 1, textAlign: 'center' } },
+            'v1.0 · Supabase + Gemini'
+          )
+        )
+      );
+
+      return React.createElement(
+        Box, { sx: { display: 'flex', minHeight: '100vh' } },
+        React.createElement(
+          AppBar, {
+            position: 'fixed',
+            color: 'transparent',
+            elevation: 0,
+            sx: {
+              backdropFilter: 'blur(20px)',
+              background: alpha(theme.palette.background.default, 0.72),
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              zIndex: theme.zIndex.drawer + 1,
+            }
+          },
+          React.createElement(
+            Toolbar, { sx: { justifyContent: 'space-between', gap: 1 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', alignItems: 'center', gap: 1 } },
+              React.createElement(
+                IconButton, { onClick: toggleDrawer, edge: 'start', sx: { display: { xs: 'flex', md: 'none' } } },
+                React.createElement(MenuIcon)
+              ),
+              React.createElement(
+                IconButton, { onClick: toggleDrawer, edge: 'start', sx: { display: { xs: 'none', md: 'flex' } } },
+                React.createElement(drawerOpen ? ExpandLessIcon : ExpandMoreIcon)
+              ),
+              React.createElement(
+                Typography, { variant: 'h6', fontWeight: 600, sx: { letterSpacing: '-0.5px', display: { xs: 'none', sm: 'block' } } },
+                state.view === 'dashboard' && 'Dashboard',
+                state.view === 'new' && 'New Meeting',
+                state.view === 'history' && 'Meetings',
+                state.view === 'search' && 'Search',
+                state.view === 'settings' && 'Settings',
+                state.view === 'detail' && 'Meeting Details'
+              )
+            ),
+            React.createElement(
+              Box, { sx: { display: 'flex', alignItems: 'center', gap: 0.5 } },
+              React.createElement(
+                IconButton, { size: 'small', onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'search' }); } },
+                React.createElement(SearchIcon)
+              ),
+              React.createElement(
+                IconButton, { size: 'small' },
+                React.createElement(
+                  Badge, { badgeContent: state.meetings.filter(m => m.actionItems?.some(a => !a.completed)).length, color: 'error' },
+                  React.createElement(NotificationsIcon)
+                )
+              ),
+              React.createElement(
+                Avatar, {
+                  sx: { width: 32, height: 32, bgcolor: 'primary.main', ml: 0.5 },
+                  children: 'A'
+                }
+              )
+            )
+          )
+        ),
+        React.createElement(
+          Drawer, {
+            variant: window.innerWidth < 768 ? 'temporary' : 'permanent',
+            open: window.innerWidth < 768 ? mobileOpen : drawerOpen,
+            onClose: () => setMobileOpen(false),
+            sx: {
+              width: 260,
+              flexShrink: 0,
+              '& .MuiDrawer-paper': {
+                width: 260,
+                boxSizing: 'border-box',
+                borderRight: '1px solid',
+                borderColor: 'divider',
+                top: 64,
+                height: 'calc(100% - 64px)',
+              }
+            }
+          },
+          drawerContent
+        ),
+        React.createElement(
+          Box, {
+            component: 'main',
+            sx: {
+              flexGrow: 1,
+              p: { xs: 2, sm: 3, md: 4 },
+              mt: 7,
+              transition: 'margin 0.2s ease',
+              marginLeft: window.innerWidth < 768 ? 0 : (drawerOpen ? 0 : -260),
+            }
+          },
+          children
+        )
+      );
+    };
+
+    // ============================================================
+    //  DASHBOARD COMPONENT
+    // ============================================================
+    const Dashboard = () => {
+      const { state, dispatch } = useApp();
+      const theme = useTheme();
+      const meetings = state.meetings || [];
+
+      const stats = useMemo(() => {
+        const total = meetings.length;
+        const totalHours = meetings.reduce((acc, m) => acc + (m.duration || 0), 0) / 3600;
+        const thisWeek = meetings.filter(m => {
+          const d = new Date(m.date);
+          const now = new Date();
+          const weekStart = new Date(now);
+          weekStart.setDate(now.getDate() - now.getDay());
+          return d >= weekStart;
+        }).length;
+        const pending = meetings.reduce((acc, m) => acc + (m.actionItems?.filter(a => !a.completed)?.length || 0), 0);
+        return { total, totalHours: totalHours.toFixed(1), thisWeek, pending };
+      }, [meetings]);
+
+      const recent = meetings.slice(0, 5);
+
+      const statCards = [
+        { label: 'Total Meetings', value: stats.total, icon: React.createElement(MeetingRoomIcon), color: '#6C5CE7' },
+        { label: 'Recording Hours', value: `${stats.totalHours}h`, icon: React.createElement(TimerIcon), color: '#00CEC9' },
+        { label: 'This Week', value: stats.thisWeek, icon: React.createElement(TodayIcon), color: '#FDCB6E' },
+        { label: 'Pending Actions', value: stats.pending, icon: React.createElement(ChecklistIcon), color: '#E17055' },
+      ];
+
+      return React.createElement(
+        Box, { className: 'fade-in-up' },
+        React.createElement(
+          Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px', mb: 1 } },
+          'Dashboard'
+        ),
+        React.createElement(
+          Typography, { variant: 'body2', color: 'text.secondary', sx: { mb: 3 } },
+          `Welcome back! You have ${stats.total} meetings recorded.`
+        ),
+        React.createElement(
+          Grid, { container, spacing: 2, sx: { mb: 3 } },
+          statCards.map((stat, i) =>
+            React.createElement(
+              Grid, { key: i, size: { xs: 6, sm: 6, md: 3 } },
+              React.createElement(
+                Card, {
+                  sx: {
+                    p: 2,
+                    borderRadius: '16px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    height: '100%',
+                  }
+                },
+                React.createElement(
+                  Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 } },
+                  React.createElement(
+                    Typography, { variant: 'caption', color: 'text.secondary', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' },
+                    stat.label
+                  ),
+                  React.createElement(
+                    Box, {
+                      sx: {
+                        width: 36,
+                        height: 36,
+                        borderRadius: '10px',
+                        background: alpha(stat.color, 0.12),
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }
+                    },
+                    React.cloneElement(stat.icon, { sx: { fontSize: 20, color: stat.color } })
+                  )
+                ),
+                React.createElement(
+                  Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px' } },
+                  stat.value
+                )
+              )
+            )
+          )
+        ),
+        React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 } },
+              React.createElement(
+                Typography, { variant: 'h6', fontWeight: 600 },
+                'Recent Meetings'
+              ),
+              React.createElement(
+                Button, { size: 'small', onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'history' }); } },
+                'View All'
+              )
+            ),
+            recent.length === 0 ?
+            React.createElement(
+              Box, { sx: { py: 4, textAlign: 'center' } },
+              React.createElement(
+                Typography, { variant: 'body2', color: 'text.secondary' },
+                'No meetings recorded yet. Start your first meeting!'
+              ),
+              React.createElement(
+                Button, {
+                  variant: 'contained',
+                  sx: { mt: 2, borderRadius: '12px' },
+                  startIcon: React.createElement(MicIcon),
+                  onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'new' }); }
+                },
+                'Start Recording'
+              )
+            ) :
+            React.createElement(
+              Stack, { spacing: 1.5 },
+              recent.map((meeting) =>
+                React.createElement(
+                  Box, {
+                    key: meeting.id,
+                    className: 'meeting-card',
+                    sx: {
+                      p: 2,
+                      borderRadius: '12px',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'all 0.2s ease',
+                      '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.03), borderColor: 'primary.main' },
+                      cursor: 'pointer',
+                    },
+                    onClick: () => {
+                      dispatch({ type: 'SET_CURRENT_MEETING', payload: meeting.id });
+                      dispatch({ type: 'SET_VIEW', payload: 'detail' });
+                    }
+                  },
+                  React.createElement(
+                    Box, { sx: { display: 'flex', alignItems: 'center', gap: 2 } },
+                    React.createElement(
+                      Box, {
+                        sx: {
+                          width: 40,
+                          height: 40,
+                          borderRadius: '10px',
+                          background: alpha(COLORS.primary, 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }
+                      },
+                      React.createElement(DescriptionIcon, { sx: { color: COLORS.primary, fontSize: 20 } })
+                    ),
+                    React.createElement(
+                      Box, { sx: { minWidth: 0 } },
+                      React.createElement(
+                        Typography, { variant: 'body1', fontWeight: 600, noWrap: true, sx: { maxWidth: 200 } },
+                        meeting.title || 'Untitled Meeting'
+                      ),
+                      React.createElement(
+                        Typography, { variant: 'caption', color: 'text.secondary', display: 'block' },
+                        `${formatDate(meeting.date)} · ${formatTime12(meeting.date)} · ${formatTime(meeting.duration || 0)}`
+                      )
+                    )
+                  ),
+                  React.createElement(
+                    Box, { sx: { display: 'flex', alignItems: 'center', gap: 1 } },
+                    (meeting.tags || []).slice(0, 2).map((tag) =>
+                      React.createElement(Chip, {
+                        key: tag,
+                        label: tag,
+                        size: 'small',
+                        sx: { height: 20, fontSize: '0.65rem', borderRadius: '6px' }
+                      })
+                    ),
+                    React.createElement(
+                      IconButton, { size: 'small' },
+                      React.createElement(MoreVertIcon, { fontSize: 'small' })
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ),
+        React.createElement(
+          Fab, {
+            className: 'fab-record',
+            color: 'error',
+            sx: {
+              position: 'fixed',
+              bottom: 32,
+              right: 32,
+              width: 64,
+              height: 64,
+              boxShadow: '0 8px 32px rgba(239,68,68,0.35)',
+              zIndex: 1000,
+            },
+            onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'new' }); }
+          },
+          React.createElement(MicIcon, { sx: { fontSize: 30 } })
+        )
+      );
+    };
+
+    // ============================================================
+    //  NEW MEETING COMPONENT (Recording)
+    // ============================================================
+    const NewMeeting = () => {
+      const { state, dispatch, addMeeting, generateSummary, saveTranscript, saveSummary, saveActionItems, uploadAudio } =
+      useApp();
+      const theme = useTheme();
+
+      const [status, setStatus] = useState('idle');
+      const [duration, setDuration] = useState(0);
+      const [transcript, setTranscript] = useState('');
+      const [transcriptSegments, setTranscriptSegments] = useState([]);
+      const [volume, setVolume] = useState(0);
+      const [meetingTitle, setMeetingTitle] = useState('');
+      const [isGenerating, setIsGenerating] = useState(false);
+      const [generatedSummary, setGeneratedSummary] = useState(null);
+      const [showSummary, setShowSummary] = useState(false);
+      const [audioBlob, setAudioBlob] = useState(null);
+      const [isSaving, setIsSaving] = useState(false);
+
+      const recordingService = useRef(null);
+      const transcriptionService = useRef(null);
+      const timerRef = useRef(null);
+      const statusRef = useRef(status);
+
+      useEffect(() => {
+        statusRef.current = status;
+      }, [status]);
+
+      useEffect(() => {
+        recordingService.current = new RecordingService();
+        recordingService.current.onTimerUpdate = (time, vol) => {
+          if (time !== null && statusRef.current !== 'paused') {
+            setDuration(time);
+          }
+          if (vol !== undefined) {
+            setVolume(vol);
+          }
+        };
+        recordingService.current.onStop = (blob) => {
+          setAudioBlob(blob);
+          setStatus('processing');
+          if (transcriptionService.current && transcriptionService.current.isListening) {
+            const result = transcriptionService.current.stop();
+            setTranscript(result.final);
+            setTranscriptSegments(result.segments || []);
+            setStatus('done');
+          } else {
+            setTimeout(() => {
+              setStatus('done');
+            }, 500);
+          }
+        };
+
+        transcriptionService.current = new TranscriptionService();
+        transcriptionService.current.onResult = (result) => {
+          setTranscript(result.final);
+          setTranscriptSegments(result.segments || []);
+        };
+        transcriptionService.current.onEnd = (result) => {
+          setTranscript(result.final);
+          setTranscriptSegments(result.segments || []);
+          if (statusRef.current === 'recording' || statusRef.current === 'paused') {
+            setStatus('done');
+          }
+        };
+
+        return () => {
+          if (recordingService.current) {
+            recordingService.current.stop();
+          }
+          if (transcriptionService.current) {
+            transcriptionService.current.stop();
+          }
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+          }
+        };
+      }, []);
+
+      const startRecording = async () => {
+        try {
+          const hasPermission = await navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(() => true)
+            .catch(() => false);
+          if (!hasPermission) {
+            dispatch({
+              type: 'SET_SNACKBAR',
+              payload: { message: 'Microphone permission is required to record.', severity: 'error' }
+            });
+            return;
+          }
+
+          await recordingService.current.start();
+          setStatus('recording');
+          setDuration(0);
+          setTranscript('');
+          setTranscriptSegments([]);
+          setGeneratedSummary(null);
+          setShowSummary(false);
+          setAudioBlob(null);
+
+          if (transcriptionService.current.isSupported()) {
+            await transcriptionService.current.start();
+          } else {
+            dispatch({
+              type: 'SET_SNACKBAR',
+              payload: { message: 'Speech recognition not supported. Using simulation.', severity: 'warning' }
+            });
+            const mockTexts = [
+              "Welcome everyone. Today we're discussing the Q4 roadmap.",
+              "We need to focus on three key areas: product development, marketing strategy, and customer engagement.",
+              "Let's review the budget allocation for the next quarter.",
+              "I think we should prioritize the mobile app launch.",
+              "We've seen a 20% increase in user engagement since last month.",
+              "The timeline is tight, but I believe we can deliver by December.",
+              "Let's assign action items and follow up next week.",
+            ];
+            let idx = 0;
+            const interval = setInterval(() => {
+              if (statusRef.current === 'recording' || statusRef.current === 'paused') {
+                if (idx < mockTexts.length) {
+                  setTranscript(prev => prev + ' ' + mockTexts[idx]);
+                  setTranscriptSegments(prev => [...prev, {
+                    speaker: `Speaker ${(idx % 2) + 1}`,
+                    text: mockTexts[idx],
+                    timestamp: idx * 3,
+                  }]);
+                  idx++;
+                } else {
+                  idx = 0;
+                }
+              } else {
+                clearInterval(interval);
+              }
+            }, 3000);
+            timerRef.current = interval;
+          }
+
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'Recording started...', severity: 'success' }
+          });
+        } catch (err) {
+          console.error('Start error:', err);
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: `Failed to start recording: ${err.message}`, severity: 'error' }
+          });
+        }
+      };
+
+      const pauseRecording = () => {
+        if (recordingService.current) {
+          recordingService.current.pause();
+          setStatus('paused');
+          if (transcriptionService.current) {
+            transcriptionService.current.stop();
+          }
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'Recording paused', severity: 'info' }
+          });
+        }
+      };
+
+      const resumeRecording = async () => {
+        if (recordingService.current) {
+          recordingService.current.resume();
+          setStatus('recording');
+          if (transcriptionService.current.isSupported()) {
+            await transcriptionService.current.start();
+          }
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'Recording resumed', severity: 'info' }
+          });
+        }
+      };
+
+      const stopRecording = () => {
+        if (recordingService.current) {
+          recordingService.current.stop();
+          setStatus('processing');
+          if (transcriptionService.current && transcriptionService.current.isListening) {
+            const result = transcriptionService.current.stop();
+            setTranscript(result.final);
+            setTranscriptSegments(result.segments || []);
+          }
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'Recording stopped. Processing...', severity: 'info' }
+          });
+        }
+      };
+
+      const generateAISummary = async () => {
+        if (!transcript.trim()) {
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'No transcript available to summarize.', severity: 'warning' }
+          });
+          return;
+        }
+        setIsGenerating(true);
+        try {
+          const summary = await generateSummary(transcript, meetingTitle || 'Meeting');
+          setGeneratedSummary(summary);
+          setShowSummary(true);
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'AI Summary generated successfully!', severity: 'success' }
+          });
+        } catch (err) {
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: `Failed to generate summary: ${err.message}`, severity: 'error' }
+          });
+        } finally {
+          setIsGenerating(false);
+        }
+      };
+
+      const saveMeeting = async () => {
+        if (!transcript.trim() && !audioBlob) {
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'No recording data to save.', severity: 'warning' }
+          });
+          return;
+        }
+
+        setIsSaving(true);
+        try {
+          let audioUrl = null;
+          if (audioBlob) {
+            try {
+              audioUrl = await uploadAudio(generateId(), audioBlob);
+            } catch (e) {
+              console.warn('Audio upload failed:', e);
+              audioUrl = audioBlob ? URL.createObjectURL(audioBlob) : null;
+            }
+          }
+
+          const meeting = {
+            id: generateId(),
+            title: meetingTitle || generatedSummary?.title || 'Untitled Meeting',
+            date: Date.now(),
+            duration: Math.round(duration),
+            transcript: transcript,
+            audio_blob: audioUrl,
+            tags: generatedSummary?.tags || [],
+            people: generatedSummary?.people || [],
+            companies: generatedSummary?.companies || [],
+            summary: generatedSummary,
+            actionItems: generatedSummary?.actionItems || [],
+            decisions: generatedSummary?.decisions || [],
+            nextSteps: generatedSummary?.nextSteps || [],
+            sentiment: generatedSummary?.sentiment || 'Neutral',
+            lastUpdated: Date.now(),
+          };
+
+          await addMeeting(meeting);
+          if (generatedSummary) {
+            await saveSummary(meeting.id, generatedSummary);
+            await saveActionItems(meeting.id, generatedSummary.actionItems || []);
+          }
+          await saveTranscript(meeting.id, transcript);
+
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'Meeting saved successfully!', severity: 'success' }
+          });
+
+          dispatch({ type: 'SET_CURRENT_MEETING', payload: meeting.id });
+          dispatch({ type: 'SET_VIEW', payload: 'detail' });
+        } catch (err) {
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: `Failed to save meeting: ${err.message}`, severity: 'error' }
+          });
+        } finally {
+          setIsSaving(false);
+        }
+      };
+
+      const formatTimeDisplay = (seconds) => {
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      const isRecording = status === 'recording';
+      const isPaused = status === 'paused';
+      const isProcessing = status === 'processing';
+      const isDone = status === 'done';
+      const isIdle = status === 'idle';
+
+      return React.createElement(
+        Box, { className: 'fade-in-up' },
+        React.createElement(
+          Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 } },
+          React.createElement(
+            Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px' } },
+            'New Meeting'
+          ),
+          React.createElement(
+            Box, { sx: { display: 'flex', gap: 1 } },
+            isDone && React.createElement(
+              Button, {
+                variant: 'contained',
+                sx: { borderRadius: '12px' },
+                startIcon: React.createElement(SaveIcon),
+                onClick: saveMeeting,
+                disabled: isSaving,
+              },
+              isSaving ? 'Saving...' : 'Save Meeting'
+            ),
+            isDone && React.createElement(
+              Button, {
+                variant: 'outlined',
+                sx: { borderRadius: '12px' },
+                startIcon: React.createElement(SummarizeIcon),
+                onClick: generateAISummary,
+                disabled: isGenerating,
+              },
+              isGenerating ? React.createElement(CircularProgress, { size: 20, sx: { mr: 1 } }) : null,
+              isGenerating ? 'Generating...' : 'AI Summary'
+            )
+          )
+        ),
+
+        React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              mb: 3,
+              overflow: 'visible',
+              position: 'relative',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3 } },
+              React.createElement(
+                Box, { sx: { display: 'flex', alignItems: 'center', gap: 2 } },
+                React.createElement(
+                  Box, {
+                    sx: {
+                      position: 'relative',
+                      width: 56,
+                      height: 56,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }
+                  },
+                  (isRecording || isPaused) && React.createElement(
+                    Box, {
+                      sx: {
+                        position: 'absolute',
+                        inset: -4,
+                        borderRadius: '50%',
+                        border: '2px solid',
+                        borderColor: isPaused ? 'warning.main' : 'error.main',
+                        animation: isRecording ? 'pulse-ring 1.8s ease-out infinite' : 'none',
+                      }
+                    }
+                  ),
+                  React.createElement(
+                    IconButton, {
+                      sx: {
+                        width: 56,
+                        height: 56,
+                        bgcolor: isRecording ? 'error.main' : isPaused ? 'warning.main' : 'primary.main',
+                        color: '#fff',
+                        '&:hover': { bgcolor: isRecording ? 'error.dark' : isPaused ? 'warning.dark' : 'primary.dark' },
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+                      },
+                      onClick: () => {
+                        if (isIdle) startRecording();
+                        else if (isRecording) pauseRecording();
+                        else if (isPaused) resumeRecording();
+                      }
+                    },
+                    isIdle ? React.createElement(MicIcon, { sx: { fontSize: 28 } }) :
+                    isRecording ? React.createElement(PauseIcon, { sx: { fontSize: 28 } }) :
+                    React.createElement(PlayArrowIcon, { sx: { fontSize: 28 } })
+                  )
+                ),
+                React.createElement(
+                  Box, { sx: { minWidth: 80 } },
+                  React.createElement(
+                    Typography, { variant: 'h5', fontWeight: 700, sx: { letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' } },
+                    formatTimeDisplay(duration)
+                  ),
+                  React.createElement(
+                    Typography, { variant: 'caption', color: 'text.secondary' },
+                    isRecording ? '● Recording' : isPaused ? '⏸ Paused' : isProcessing ? '⏳ Processing...' : isDone ? '✅ Done' : 'Ready'
+                  )
+                )
+              ),
+              (isRecording || isPaused) && React.createElement(
+                Box, { sx: { flex: 1, minWidth: 100, maxWidth: 200 } },
+                React.createElement(
+                  LinearProgress, {
+                    variant: 'determinate',
+                    value: volume * 100,
+                    sx: {
+                      height: 4,
+                      borderRadius: 4,
+                      bgcolor: alpha(theme.palette.primary.main, 0.12),
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: volume > 0.6 ? 'success.main' : volume > 0.3 ? 'warning.main' : 'primary.main',
+                      }
+                    }
+                  }
+                ),
+                React.createElement(
+                  Box, { sx: { display: 'flex', justifyContent: 'space-between', mt: 0.5 } },
+                  React.createElement(
+                    Typography, { variant: 'caption', color: 'text.secondary', sx: { fontSize: '0.6rem' } },
+                    'Volume'
+                  ),
+                  React.createElement(
+                    Typography, { variant: 'caption', color: 'text.secondary', sx: { fontSize: '0.6rem' } },
+                    `${Math.round(volume * 100)}%`
+                  )
+                )
+              ),
+              (isRecording || isPaused) && React.createElement(
+                Button, {
+                  variant: 'outlined',
+                  color: 'error',
+                  sx: { borderRadius: '12px' },
+                  startIcon: React.createElement(StopIcon),
+                  onClick: stopRecording,
+                },
+                'Stop'
+              ),
+              isDone && React.createElement(
+                Chip, {
+                  label: 'Recording Complete',
+                  color: 'success',
+                  icon: React.createElement(CheckCircleIcon),
+                  sx: { borderRadius: '8px' }
+                }
+              ),
+              isProcessing && React.createElement(
+                Chip, {
+                  label: 'Processing...',
+                  color: 'info',
+                  icon: React.createElement(CircularProgress, { size: 14, sx: { color: 'inherit' } }),
+                  sx: { borderRadius: '8px' }
+                }
+              )
+            )
+          )
+        ),
+
+        (isDone || isProcessing || transcript) && React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              mb: 3,
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 } },
+              React.createElement(
+                Typography, { variant: 'h6', fontWeight: 600 },
+                'Transcript',
+                React.createElement(Typography, { component: 'span', variant: 'caption', color: 'text.secondary', sx: { ml: 1.5 } },
+                  transcriptSegments.length > 0 ? `${transcriptSegments.length} segments` :
+                  `${transcript.split(/\s+/).filter(w => w.length > 0).length} words`
+                )
+              ),
+              transcript && React.createElement(
+                Button, { size: 'small', startIcon: React.createElement(ContentCopyIcon),
+                  onClick: () => {
+                    navigator.clipboard?.writeText(transcript);
+                    dispatch({
+                      type: 'SET_SNACKBAR',
+                      payload: { message: 'Transcript copied!', severity: 'success' }
+                    });
+                  }
+                },
+                'Copy'
+              )
+            ),
+            React.createElement(
+              Paper, {
+                className: 'transcript-scroll',
+                sx: {
+                  p: 2,
+                  borderRadius: '12px',
+                  bgcolor: alpha(theme.palette.background.default, 0.6),
+                  maxHeight: 240,
+                  overflow: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.8,
+                  whiteSpace: 'pre-wrap',
+                }
+              },
+              transcript || (isProcessing ? 'Processing transcription...' : 'No transcript yet. Start recording to capture speech.')
+            )
+          )
+        ),
+
+        (generatedSummary && showSummary) && React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              mb: 3,
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 } },
+              React.createElement(
+                Box, { sx: { display: 'flex', alignItems: 'center', gap: 1.5 } },
+                React.createElement(AutoAwesomeIcon, { sx: { color: COLORS.primary } }),
+                React.createElement(
+                  Typography, { variant: 'h6', fontWeight: 600 },
+                  'AI Summary (Gemini)'
+                ),
+                React.createElement(Chip, {
+                  label: generatedSummary.sentiment || 'Neutral',
+                  size: 'small',
+                  sx: {
+                    borderRadius: '6px',
+                    bgcolor: generatedSummary.sentiment === 'Positive' ? 'success.main' :
+                      generatedSummary.sentiment === 'Needs Attention' ? 'error.main' : 'warning.main',
+                    color: '#fff',
+                    height: 20,
+                    fontSize: '0.6rem',
+                    fontWeight: 600,
+                  }
+                })
+              ),
+              React.createElement(
+                IconButton, { size: 'small', onClick: () => setShowSummary(false) },
+                React.createElement(CloseIcon, { fontSize: 'small' })
+              )
+            ),
+            React.createElement(
+              Grid, { container, spacing: 2 },
+              React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Executive Summary'
+                ),
+                React.createElement(
+                  Typography, { variant: 'body2', sx: { mb: 1.5 } },
+                  generatedSummary.executiveSummary || 'No summary available.'
+                )
+              ),
+              React.createElement(
+                Grid, { size: { xs: 12, md: 6 } },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Key Discussion Points'
+                ),
+                React.createElement(
+                  Box, { component: 'ul', sx: { m: 0, pl: 2 } },
+                  (generatedSummary.keyPoints || []).map((p, i) =>
+                    React.createElement(Typography, { key: i, component: 'li', variant: 'body2', sx: { mb: 0.3 } }, p)
+                  )
+                )
+              ),
+              React.createElement(
+                Grid, { size: { xs: 12, md: 6 } },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Decisions Made'
+                ),
+                React.createElement(
+                  Box, { component: 'ul', sx: { m: 0, pl: 2 } },
+                  (generatedSummary.decisions || []).map((d, i) =>
+                    React.createElement(Typography, { key: i, component: 'li', variant: 'body2', sx: { mb: 0.3 } }, d)
+                  )
+                )
+              ),
+              React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Action Items'
+                ),
+                React.createElement(
+                  Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 1 } },
+                  (generatedSummary.actionItems || []).map((item) =>
+                    React.createElement(Chip, {
+                      key: item.id,
+                      label: item.description,
+                      size: 'small',
+                      sx: {
+                        borderRadius: '8px',
+                        bgcolor: alpha(theme.palette.primary.main, 0.08),
+                        maxWidth: '100%',
+                      },
+                      icon: React.createElement(ChecklistIcon, { sx: { fontSize: 14 } })
+                    })
+                  )
+                )
+              ),
+              React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Tags'
+                ),
+                React.createElement(
+                  Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5 } },
+                  (generatedSummary.tags || []).map((tag) =>
+                    React.createElement(Chip, {
+                      key: tag,
+                      label: tag,
+                      size: 'small',
+                      variant: 'outlined',
+                      sx: { borderRadius: '6px', fontSize: '0.7rem' }
+                    })
+                  )
+                )
+              )
+            )
+          )
+        ),
+
+        isDone && React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              'Meeting Details'
+            ),
+            React.createElement(
+              TextField, {
+                fullWidth: true,
+                label: 'Meeting Title',
+                value: meetingTitle,
+                onChange: (e) => setMeetingTitle(e.target.value),
+                placeholder: 'Enter a title for this meeting...',
+                variant: 'outlined',
+                sx: { mb: 2 },
+                InputProps: {
+                  startAdornment: React.createElement(InputAdornment, { position: 'start' },
+                    React.createElement(DescriptionIcon))
+                }
+              }
+            ),
+            React.createElement(
+              Box, { sx: { display: 'flex', gap: 1.5, flexWrap: 'wrap' } },
+              React.createElement(
+                Button, {
+                  variant: 'contained',
+                  startIcon: React.createElement(SaveIcon),
+                  sx: { borderRadius: '12px' },
+                  onClick: saveMeeting,
+                  disabled: isSaving,
+                },
+                isSaving ? 'Saving...' : 'Save Meeting'
+              ),
+              React.createElement(
+                Button, {
+                  variant: 'outlined',
+                  startIcon: React.createElement(SummarizeIcon),
+                  sx: { borderRadius: '12px' },
+                  onClick: generateAISummary,
+                  disabled: isGenerating,
+                },
+                isGenerating ? React.createElement(CircularProgress, { size: 20, sx: { mr: 1 } }) : null,
+                isGenerating ? 'Generating...' : 'Generate AI Summary'
+              ),
+              React.createElement(
+                Button, {
+                  variant: 'outlined',
+                  startIcon: React.createElement(ShareIcon),
+                  sx: { borderRadius: '12px' },
+                  onClick: () => {
+                    dispatch({
+                      type: 'SET_SNACKBAR',
+                      payload: { message: 'Share feature coming soon!', severity: 'info' }
+                    });
+                  }
+                },
+                'Share'
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ============================================================
+    //  MEETING HISTORY COMPONENT
+    // ============================================================
+    const MeetingHistory = () => {
+      const { state, dispatch } = useApp();
+      const theme = useTheme();
+      const [searchTerm, setSearchTerm] = useState('');
+      const [filterTags, setFilterTags] = useState([]);
+      const [filterDate, setFilterDate] = useState('');
+
+      const meetings = state.meetings || [];
+
+      const filtered = useMemo(() => {
+        let result = meetings;
+        if (searchTerm) {
+          const q = searchTerm.toLowerCase();
+          result = result.filter(m =>
+            m.title?.toLowerCase().includes(q) ||
+            m.transcript?.toLowerCase().includes(q) ||
+            (m.tags || []).some(t => t.toLowerCase().includes(q)) ||
+            (m.people || []).some(p => p.toLowerCase().includes(q))
+          );
+        }
+        if (filterDate) {
+          const d = new Date(filterDate);
+          result = result.filter(m =>
+            new Date(m.date).toDateString() === d.toDateString()
+          );
+        }
+        if (filterTags.length > 0) {
+          result = result.filter(m =>
+            (m.tags || []).some(t => filterTags.includes(t))
+          );
+        }
+        return result;
+      }, [meetings, searchTerm, filterDate, filterTags]);
+
+      const allTags = useMemo(() => {
+        const tags = new Set();
+        meetings.forEach(m => (m.tags || []).forEach(t => tags.add(t)));
+        return Array.from(tags);
+      }, [meetings]);
+
+      return React.createElement(
+        Box, { className: 'fade-in-up' },
+        React.createElement(
+          Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 3 } },
+          React.createElement(
+            Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px' } },
+            'Meetings'
+          ),
+          React.createElement(
+            Box, { sx: { display: 'flex', gap: 1, alignItems: 'center' } },
+            React.createElement(
+              TextField, {
+                placeholder: 'Search meetings...',
+                size: 'small',
+                value: searchTerm,
+                onChange: (e) => setSearchTerm(e.target.value),
+                sx: { width: { xs: '100%', sm: 220 } },
+                InputProps: {
+                  startAdornment: React.createElement(InputAdornment, { position: 'start' },
+                    React.createElement(SearchIcon, { fontSize: 'small' }))
+                }
+              }
+            ),
+            React.createElement(
+              TextField, {
+                type: 'date',
+                size: 'small',
+                value: filterDate,
+                onChange: (e) => setFilterDate(e.target.value),
+                sx: { width: { xs: '100%', sm: 150 } },
+                InputLabelProps: { shrink: true }
+              }
+            )
+          )
+        ),
+
+        allTags.length > 0 && React.createElement(
+          Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 2 } },
+          allTags.map((tag) =>
+            React.createElement(Chip, {
+              key: tag,
+              label: tag,
+              size: 'small',
+              variant: filterTags.includes(tag) ? 'filled' : 'outlined',
+              color: filterTags.includes(tag) ? 'primary' : 'default',
+              onClick: () => {
+                if (filterTags.includes(tag)) {
+                  setFilterTags(filterTags.filter(t => t !== tag));
+                } else {
+                  setFilterTags([...filterTags, tag]);
+                }
+              },
+              sx: { borderRadius: '6px', cursor: 'pointer' }
+            })
+          ),
+          filterTags.length > 0 && React.createElement(
+            Button, { size: 'small', onClick: () => setFilterTags([]), sx: { ml: 1 } },
+            'Clear filters'
+          )
+        ),
+
+        React.createElement(
+          Typography, { variant: 'caption', color: 'text.secondary', sx: { display: 'block', mb: 2 } },
+          `${filtered.length} meeting${filtered.length !== 1 ? 's' : ''} found`
+        ),
+
+        filtered.length === 0 ?
+        React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              p: 4,
+              textAlign: 'center'
+            }
+          },
+          React.createElement(
+            Typography, { variant: 'body1', color: 'text.secondary' },
+            'No meetings found. Start recording your first meeting!'
+          ),
+          React.createElement(
+            Button, {
+              variant: 'contained',
+              sx: { mt: 2, borderRadius: '12px' },
+              startIcon: React.createElement(MicIcon),
+              onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'new' }); }
+            },
+            'Start Recording'
+          )
+        ) :
+        React.createElement(
+          Stack, { spacing: 1.5 },
+          filtered.map((meeting) =>
+            React.createElement(
+              Card, {
+                key: meeting.id,
+                className: 'meeting-card',
+                sx: {
+                  borderRadius: '12px',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  transition: 'all 0.2s ease',
+                  '&:hover': { boxShadow: '0 4px 12px rgba(0,0,0,0.06)' },
+                  cursor: 'pointer',
+                },
+                onClick: () => {
+                  dispatch({ type: 'SET_CURRENT_MEETING', payload: meeting.id });
+                  dispatch({ type: 'SET_VIEW', payload: 'detail' });
+                }
+              },
+              React.createElement(
+                CardContent, { sx: { p: 2.5 } },
+                React.createElement(
+                  Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 1 } },
+                  React.createElement(
+                    Box, { sx: { flex: 1, minWidth: 0 } },
+                    React.createElement(
+                      Typography, { variant: 'h6', fontWeight: 600, noWrap: true },
+                      meeting.title || 'Untitled Meeting'
+                    ),
+                    React.createElement(
+                      Typography, { variant: 'caption', color: 'text.secondary', display: 'block' },
+                      `${formatDateTime(meeting.date)} · ${formatTime(meeting.duration || 0)}`
+                    ),
+                    React.createElement(
+                      Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 } },
+                      (meeting.tags || []).slice(0, 4).map((tag) =>
+                        React.createElement(Chip, {
+                          key: tag,
+                          label: tag,
+                          size: 'small',
+                          sx: { height: 20, fontSize: '0.6rem', borderRadius: '4px' }
+                        })
+                      )
+                    )
+                  ),
+                  React.createElement(
+                    Box, { sx: { display: 'flex', alignItems: 'center', gap: 1 } },
+                    meeting.sentiment && React.createElement(Chip, {
+                      label: meeting.sentiment,
+                      size: 'small',
+                      sx: {
+                        height: 20,
+                        fontSize: '0.6rem',
+                        borderRadius: '4px',
+                        bgcolor: meeting.sentiment === 'Positive' ? 'success.main' :
+                          meeting.sentiment === 'Needs Attention' ? 'error.main' : 'warning.main',
+                        color: '#fff',
+                      }
+                    }),
+                    React.createElement(
+                      IconButton, { size: 'small', onClick: (e) => {
+                          e.stopPropagation();
+                          dispatch({ type: 'SET_CURRENT_MEETING', payload: meeting.id });
+                          dispatch({ type: 'SET_VIEW', payload: 'detail' });
+                        }
+                      },
+                      React.createElement(LaunchIcon, { fontSize: 'small' })
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ============================================================
+    //  MEETING DETAIL COMPONENT
+    // ============================================================
+    const MeetingDetail = () => {
+      const { state, dispatch, getMeeting, getActionItems, deleteMeeting } = useApp();
+      const theme = useTheme();
+      const [meeting, setMeeting] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [actionItems, setActionItems] = useState([]);
+      const [activeTab, setActiveTab] = useState(0);
+      const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+      const meetingId = state.currentMeetingId;
+
+      useEffect(() => {
+        if (!meetingId) {
+          dispatch({ type: 'SET_VIEW', payload: 'dashboard' });
+          return;
+        }
+        const load = async () => {
+          setLoading(true);
+          try {
+            const m = await getMeeting(meetingId);
+            if (m) {
+              setMeeting(m);
+              const items = await getActionItems(meetingId);
+              setActionItems(items.length > 0 ? items : m.actionItems || []);
+            } else {
+              dispatch({ type: 'SET_VIEW', payload: 'history' });
+            }
+          } catch (e) {
+            console.error('Error loading meeting:', e);
+          }
+          setLoading(false);
+        };
+        load();
+      }, [meetingId]);
+
+      const handleDelete = async () => {
+        if (meetingId) {
+          await deleteMeeting(meetingId);
+          setShowDeleteDialog(false);
+          dispatch({ type: 'SET_VIEW', payload: 'history' });
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'Meeting deleted successfully.', severity: 'success' }
+          });
+        }
+      };
+
+      const toggleActionItem = async (id) => {
+        const updated = actionItems.map(item =>
+          item.id === id ? { ...item, completed: !item.completed } : item
+        );
+        setActionItems(updated);
+        if (meeting) {
+          const updatedMeeting = { ...meeting, actionItems: updated };
+          setMeeting(updatedMeeting);
+        }
+      };
+
+      if (loading) {
+        return React.createElement(
+          Box, { sx: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' } },
+          React.createElement(CircularProgress)
+        );
+      }
+
+      if (!meeting) {
+        return React.createElement(
+          Box, { sx: { textAlign: 'center', py: 8 } },
+          React.createElement(Typography, { variant: 'h5', color: 'text.secondary' }, 'Meeting not found'),
+          React.createElement(Button, {
+            sx: { mt: 2 },
+            onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'history' }); }
+          }, 'Back to Meetings')
+        );
+      }
+
+      const summary = meeting.summary || {};
+      const transcript = meeting.transcript || '';
+
+      const tabs = [
+        { label: 'Summary', icon: React.createElement(SummarizeIcon) },
+        { label: 'Transcript', icon: React.createElement(DescriptionIcon) },
+        { label: 'Action Items', icon: React.createElement(ChecklistIcon) },
+        { label: 'Notes', icon: React.createElement(EventNoteIcon) },
+      ];
+
+      return React.createElement(
+        Box, { className: 'fade-in-up' },
+        React.createElement(
+          Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2, mb: 3 } },
+          React.createElement(
+            Box, { sx: { display: 'flex', alignItems: 'center', gap: 1.5 } },
+            React.createElement(
+              IconButton, {
+                onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'history' }); },
+                sx: { bgcolor: alpha(theme.palette.primary.main, 0.08) }
+              },
+              React.createElement(ArrowBackIcon)
+            ),
+            React.createElement(
+              Box, { sx: { minWidth: 0 } },
+              React.createElement(
+                Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px', wordBreak: 'break-word' } },
+                meeting.title || 'Untitled Meeting'
+              ),
+              React.createElement(
+                Typography, { variant: 'caption', color: 'text.secondary' },
+                `${formatDateTime(meeting.date)} · ${formatTime(meeting.duration || 0)} · ${meeting.sentiment || 'Neutral'} sentiment`
+              )
+            )
+          ),
+          React.createElement(
+            Box, { sx: { display: 'flex', gap: 1, flexWrap: 'wrap' } },
+            React.createElement(
+              Button, {
+                size: 'small',
+                variant: 'outlined',
+                startIcon: React.createElement(ShareIcon),
+                sx: { borderRadius: '10px' },
+                onClick: () => {
+                  dispatch({
+                    type: 'SET_SNACKBAR',
+                    payload: { message: 'Share feature coming soon!', severity: 'info' }
+                  });
+                }
+              },
+              'Share'
+            ),
+            React.createElement(
+              Button, {
+                size: 'small',
+                variant: 'outlined',
+                startIcon: React.createElement(FileDownloadIcon),
+                sx: { borderRadius: '10px' },
+                onClick: () => {
+                  const content =
+                    `Meeting: ${meeting.title}\nDate: ${formatDateTime(meeting.date)}\nDuration: ${formatTime(meeting.duration || 0)}\n\nSummary:\n${summary.executiveSummary || 'N/A'}\n\nTranscript:\n${transcript.slice(0, 500)}...`;
+                  const blob = new Blob([content], { type: 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${meeting.title || 'meeting'}.txt`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }
+              },
+              'Export'
+            ),
+            React.createElement(
+              Button, {
+                size: 'small',
+                color: 'error',
+                variant: 'outlined',
+                startIcon: React.createElement(DeleteIcon),
+                sx: { borderRadius: '10px' },
+                onClick: () => setShowDeleteDialog(true)
+              },
+              'Delete'
+            )
+          )
+        ),
+
+        (meeting.tags?.length > 0) && React.createElement(
+          Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 2 } },
+          meeting.tags.map((tag) =>
+            React.createElement(Chip, {
+              key: tag,
+              label: tag,
+              size: 'small',
+              variant: 'outlined',
+              sx: { borderRadius: '6px', fontSize: '0.7rem' }
+            })
+          )
+        ),
+
+        meeting.audio_blob && React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              mb: 2,
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 2 } },
+            React.createElement(
+              Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 1 } },
+              'Audio Recording'
+            ),
+            React.createElement(
+              'audio', {
+                controls: true,
+                src: meeting.audio_blob,
+                style: { width: '100%', borderRadius: '8px' }
+              }
+            )
+          )
+        ),
+
+        React.createElement(
+          Tabs, {
+            value: activeTab,
+            onChange: (e, v) => setActiveTab(v),
+            sx: { mb: 3, borderBottom: '1px solid', borderColor: 'divider' },
+            variant: 'scrollable',
+            scrollButtons: 'auto',
+          },
+          tabs.map((tab, i) =>
+            React.createElement(Tab, {
+              key: i,
+              label: tab.label,
+              icon: tab.icon,
+              iconPosition: 'start',
+              sx: { minHeight: 48, fontWeight: 500 }
+            })
+          )
+        ),
+
+        activeTab === 0 && React.createElement(
+          Box, { sx: { display: 'flex', flexDirection: 'column', gap: 2 } },
+          React.createElement(
+            Card, {
+              sx: {
+                borderRadius: '16px',
+                border: '1px solid',
+                borderColor: 'divider',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }
+            },
+            React.createElement(
+              CardContent, { sx: { p: 3 } },
+              React.createElement(
+                Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                'Executive Summary'
+              ),
+              React.createElement(
+                Typography, { variant: 'body1' },
+                summary.executiveSummary || 'No summary available.'
+              )
+            )
+          ),
+          React.createElement(
+            Grid, { container, spacing: 2 },
+            React.createElement(
+              Grid, { size: { xs: 12, md: 6 } },
+              React.createElement(
+                Card, {
+                  sx: {
+                    borderRadius: '16px',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    height: '100%',
+                  }
+                },
+                React.createElement(
+                  CardContent, { sx: { p: 3 } },
+                  React.createElement(
+                    Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 1 } },
+                    'Key Discussion Points'
+                  ),
+                  (summary.keyPoints || []).map((p, i) =>
+                    React.createElement(Typography, { key: i, variant: 'body2', sx: { py: 0.5, borderBottom: '1px solid', borderColor: 'divider', '&:last-child': { borderBottom: 'none' } } },
+                      `• ${p}`
+                    )
+                  ) || React.createElement(Typography, { variant: 'body2', color: 'text.secondary' }, 'No key points recorded.')
+                )
+              )
+            ),
+            React.createElement(
+              Grid, { size: { xs: 12, md: 6 } },
+              React.createElement(
+                Card, {
+                  sx: {
+                    borderRadius: '16px',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    height: '100%',
+                  }
+                },
+                React.createElement(
+                  CardContent, { sx: { p: 3 } },
+                  React.createElement(
+                    Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 1 } },
+                    'Decisions Made'
+                  ),
+                  (summary.decisions || []).map((d, i) =>
+                    React.createElement(Typography, { key: i, variant: 'body2', sx: { py: 0.5, borderBottom: '1px solid', borderColor: 'divider', '&:last-child': { borderBottom: 'none' } } },
+                      `✓ ${d}`
+                    )
+                  ) || React.createElement(Typography, { variant: 'body2', color: 'text.secondary' }, 'No decisions recorded.')
+                )
+              )
+            )
+          ),
+          React.createElement(
+            Card, {
+              sx: {
+                borderRadius: '16px',
+                border: '1px solid',
+                borderColor: 'divider',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }
+            },
+            React.createElement(
+              CardContent, { sx: { p: 3 } },
+              React.createElement(
+                Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 1 } },
+                'Action Items'
+              ),
+              (actionItems.length > 0) ?
+              React.createElement(
+                Stack, { spacing: 1 },
+                actionItems.map((item) =>
+                  React.createElement(
+                    Box, {
+                      key: item.id,
+                      sx: {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1.5,
+                        py: 0.5,
+                        borderBottom: '1px solid',
+                        borderColor: 'divider',
+                        '&:last-child': { borderBottom: 'none' },
+                      }
+                    },
+                    React.createElement(Checkbox, {
+                      checked: item.completed,
+                      onChange: () => toggleActionItem(item.id),
+                      size: 'small',
+                    }),
+                    React.createElement(
+                      Typography, {
+                        variant: 'body2',
+                        sx: {
+                          flex: 1,
+                          textDecoration: item.completed ? 'line-through' : 'none',
+                          color: item.completed ? 'text.disabled' : 'inherit',
+                        }
+                      },
+                      item.description
+                    ),
+                    item.priority && React.createElement(Chip, {
+                      label: item.priority,
+                      size: 'small',
+                      sx: {
+                        height: 20,
+                        fontSize: '0.6rem',
+                        borderRadius: '4px',
+                        bgcolor: item.priority === 'High' ? 'error.main' :
+                          item.priority === 'Medium' ? 'warning.main' : 'success.main',
+                        color: '#fff',
+                      }
+                    }),
+                    item.assignee && React.createElement(Chip, {
+                      label: item.assignee,
+                      size: 'small',
+                      variant: 'outlined',
+                      sx: { height: 20, fontSize: '0.6rem', borderRadius: '4px' }
+                    })
+                  )
+                )
+              ) :
+              React.createElement(Typography, { variant: 'body2', color: 'text.secondary' }, 'No action items.')
+            )
+          ),
+          React.createElement(
+            Grid, { container, spacing: 2 },
+            summary.people?.length > 0 && React.createElement(
+              Grid, { size: { xs: 12, sm: 6 } },
+              React.createElement(
+                Card, {
+                  sx: {
+                    borderRadius: '16px',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  }
+                },
+                React.createElement(
+                  CardContent, { sx: { p: 2.5 } },
+                  React.createElement(
+                    Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                    'People Mentioned'
+                  ),
+                  React.createElement(
+                    Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5 } },
+                    summary.people.map((p) =>
+                      React.createElement(Chip, {
+                        key: p,
+                        label: p,
+                        size: 'small',
+                        icon: React.createElement(PersonIcon, { sx: { fontSize: 14 } }),
+                        sx: { borderRadius: '6px' }
+                      })
+                    )
+                  )
+                )
+              )
+            ),
+            summary.companies?.length > 0 && React.createElement(
+              Grid, { size: { xs: 12, sm: 6 } },
+              React.createElement(
+                Card, {
+                  sx: {
+                    borderRadius: '16px',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  }
+                },
+                React.createElement(
+                  CardContent, { sx: { p: 2.5 } },
+                  React.createElement(
+                    Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                    'Companies Mentioned'
+                  ),
+                  React.createElement(
+                    Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5 } },
+                    summary.companies.map((c) =>
+                      React.createElement(Chip, {
+                        key: c,
+                        label: c,
+                        size: 'small',
+                        icon: React.createElement(BusinessIcon, { sx: { fontSize: 14 } }),
+                        sx: { borderRadius: '6px' }
+                      })
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ),
+
+        activeTab === 1 && React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 } },
+              React.createElement(
+                Typography, { variant: 'h6', fontWeight: 600 },
+                'Full Transcript'
+              ),
+              React.createElement(
+                Button, {
+                  size: 'small',
+                  startIcon: React.createElement(ContentCopyIcon),
+                  onClick: () => {
+                    navigator.clipboard?.writeText(transcript);
+                    dispatch({
+                      type: 'SET_SNACKBAR',
+                      payload: { message: 'Transcript copied!', severity: 'success' }
+                    });
+                  }
+                },
+                'Copy'
+              )
+            ),
+            React.createElement(
+              Paper, {
+                sx: {
+                  p: 3,
+                  borderRadius: '12px',
+                  bgcolor: alpha(theme.palette.background.default, 0.6),
+                  maxHeight: 500,
+                  overflow: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: '0.85rem',
+                  lineHeight: 2,
+                  whiteSpace: 'pre-wrap',
+                }
+              },
+              transcript || 'No transcript available.'
+            )
+          )
+        ),
+
+        activeTab === 2 && React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              'Action Items'
+            ),
+            actionItems.length > 0 ?
+            React.createElement(
+              Stack, { spacing: 1.5 },
+              actionItems.map((item) =>
+                React.createElement(
+                  Paper, {
+                    key: item.id,
+                    sx: {
+                      p: 2,
+                      borderRadius: '12px',
+                      border: '1px solid',
+                      borderColor: item.completed ? 'success.main' : 'divider',
+                      bgcolor: item.completed ? alpha(theme.palette.success.main, 0.04) : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      flexWrap: 'wrap',
+                    }
+                  },
+                  React.createElement(Checkbox, {
+                    checked: item.completed,
+                    onChange: () => toggleActionItem(item.id),
+                  }),
+                  React.createElement(
+                    Box, { sx: { flex: 1, minWidth: 150 } },
+                    React.createElement(
+                      Typography, {
+                        variant: 'body1',
+                        sx: {
+                          textDecoration: item.completed ? 'line-through' : 'none',
+                          color: item.completed ? 'text.disabled' : 'inherit',
+                        }
+                      },
+                      item.description
+                    ),
+                    React.createElement(
+                      Typography, { variant: 'caption', color: 'text.secondary' },
+                      item.assignee ? `Assigned to: ${item.assignee}` : '',
+                      item.dueDate ? ` · Due: ${new Date(item.dueDate).toLocaleDateString()}` : ''
+                    )
+                  ),
+                  item.priority && React.createElement(Chip, {
+                    label: item.priority,
+                    size: 'small',
+                    sx: {
+                      borderRadius: '6px',
+                      bgcolor: item.priority === 'High' ? 'error.main' :
+                        item.priority === 'Medium' ? 'warning.main' : 'success.main',
+                      color: '#fff',
+                    }
+                  })
+                )
+              )
+            ) :
+            React.createElement(
+              Typography, { variant: 'body2', color: 'text.secondary', sx: { py: 4, textAlign: 'center' } },
+              'No action items found for this meeting.'
+            )
+          )
+        ),
+
+        activeTab === 3 && React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              'Meeting Notes'
+            ),
+            React.createElement(
+              Grid, { container, spacing: 2 },
+              summary.bulletNotes?.length > 0 && React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Bullet Notes'
+                ),
+                React.createElement(
+                  Box, { component: 'ul', sx: { m: 0, pl: 2 } },
+                  summary.bulletNotes.map((n, i) =>
+                    React.createElement(Typography, { key: i, component: 'li', variant: 'body2', sx: { mb: 0.3 } }, n)
+                  )
+                )
+              ),
+              summary.detailedNotes && React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Detailed Notes'
+                ),
+                React.createElement(
+                  Typography, { variant: 'body2' },
+                  summary.detailedNotes
+                )
+              ),
+              summary.oneMinuteSummary && React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  '1-Minute Summary'
+                ),
+                React.createElement(
+                  Paper, {
+                    sx: {
+                      p: 2,
+                      borderRadius: '12px',
+                      bgcolor: alpha(theme.palette.primary.main, 0.04),
+                      border: '1px solid',
+                      borderColor: alpha(theme.palette.primary.main, 0.12),
+                    }
+                  },
+                  React.createElement(
+                    Typography, { variant: 'body2' },
+                    summary.oneMinuteSummary
+                  )
+                )
+              ),
+              summary.emailSummary && React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'Email-Ready Summary'
+                ),
+                React.createElement(
+                  Paper, {
+                    sx: {
+                      p: 2,
+                      borderRadius: '12px',
+                      bgcolor: alpha(theme.palette.background.default, 0.4),
+                      fontFamily: 'monospace',
+                      fontSize: '0.8rem',
+                      whiteSpace: 'pre-wrap',
+                      maxHeight: 200,
+                      overflow: 'auto',
+                    }
+                  },
+                  summary.emailSummary
+                ),
+                React.createElement(
+                  Button, {
+                    size: 'small',
+                    sx: { mt: 1 },
+                    startIcon: React.createElement(ContentCopyIcon),
+                    onClick: () => {
+                      navigator.clipboard?.writeText(summary.emailSummary);
+                      dispatch({
+                        type: 'SET_SNACKBAR',
+                        payload: { message: 'Copied to clipboard!', severity: 'success' }
+                      });
+                    }
+                  },
+                  'Copy Email'
+                )
+              ),
+              summary.whatsappSummary && React.createElement(
+                Grid, { size: 12 },
+                React.createElement(
+                  Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 0.5 } },
+                  'WhatsApp-Ready Summary'
+                ),
+                React.createElement(
+                  Paper, {
+                    sx: {
+                      p: 2,
+                      borderRadius: '12px',
+                      bgcolor: alpha(theme.palette.success.main, 0.04),
+                      border: '1px solid',
+                      borderColor: alpha(theme.palette.success.main, 0.12),
+                      whiteSpace: 'pre-wrap',
+                      maxHeight: 150,
+                      overflow: 'auto',
+                    }
+                  },
+                  React.createElement(
+                    Typography, { variant: 'body2' },
+                    summary.whatsappSummary
+                  )
+                ),
+                React.createElement(
+                  Button, {
+                    size: 'small',
+                    sx: { mt: 1 },
+                    startIcon: React.createElement(ContentCopyIcon),
+                    onClick: () => {
+                      navigator.clipboard?.writeText(summary.whatsappSummary);
+                      dispatch({
+                        type: 'SET_SNACKBAR',
+                        payload: { message: 'Copied to clipboard!', severity: 'success' }
+                      });
+                    }
+                  },
+                  'Copy WhatsApp'
+                )
+              )
+            )
+          )
+        ),
+
+        React.createElement(
+          Dialog, { open: showDeleteDialog, onClose: () => setShowDeleteDialog(false) },
+          React.createElement(
+            DialogTitle, { sx: { fontWeight: 600 } },
+            'Delete Meeting?'
+          ),
+          React.createElement(
+            DialogContent, null,
+            React.createElement(
+              Typography, { variant: 'body2' },
+              `Are you sure you want to delete "${meeting.title || 'Untitled Meeting'}"? This action cannot be undone.`
+            )
+          ),
+          React.createElement(
+            DialogActions, null,
+            React.createElement(Button, { onClick: () => setShowDeleteDialog(false) }, 'Cancel'),
+            React.createElement(Button, { onClick: handleDelete, color: 'error', variant: 'contained' }, 'Delete')
+          )
+        )
+      );
+    };
+
+    // ============================================================
+    //  SEARCH COMPONENT
+    // ============================================================
+    const SearchPage = () => {
+      const { state, dispatch, searchMeetings } = useApp();
+      const theme = useTheme();
+      const [query, setQuery] = useState('');
+      const [results, setResults] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [searched, setSearched] = useState(false);
+
+      const handleSearch = async () => {
+        if (!query.trim()) {
+          setResults([]);
+          setSearched(false);
+          return;
+        }
+        setLoading(true);
+        try {
+          const res = await searchMeetings(query.trim());
+          setResults(res);
+          setSearched(true);
+        } catch (e) {
+          console.error('Search error:', e);
+          dispatch({
+            type: 'SET_SNACKBAR',
+            payload: { message: 'Search failed: ' + e.message, severity: 'error' }
+          });
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        const timer = setTimeout(() => {
+          if (query.trim()) handleSearch();
+        }, 500);
+        return () => clearTimeout(timer);
+      }, [query]);
+
+      return React.createElement(
+        Box, { className: 'fade-in-up' },
+        React.createElement(
+          Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px', mb: 3 } },
+          'Search Meetings'
+        ),
+        React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              mb: 3,
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              TextField, {
+                fullWidth: true,
+                placeholder: 'Search by title, transcript, tags, people, or companies...',
+                value: query,
+                onChange: (e) => setQuery(e.target.value),
+                variant: 'outlined',
+                InputProps: {
+                  startAdornment: React.createElement(InputAdornment, { position: 'start' },
+                    React.createElement(SearchIcon)
+                  ),
+                  endAdornment: query && React.createElement(
+                    InputAdornment, { position: 'end' },
+                    React.createElement(
+                      IconButton, { size: 'small', onClick: () => setQuery('') },
+                      React.createElement(CloseIcon)
+                    )
+                  )
+                },
+                sx: { mb: 2 }
+              }
+            ),
+            loading && React.createElement(
+              Box, { sx: { display: 'flex', justifyContent: 'center', py: 2 } },
+              React.createElement(CircularProgress)
+            ),
+            !loading && searched && results.length === 0 && React.createElement(
+              Box, { sx: { py: 4, textAlign: 'center' } },
+              React.createElement(
+                Typography, { variant: 'body1', color: 'text.secondary' },
+                'No meetings found matching your search.'
+              )
+            ),
+            !loading && results.length > 0 && React.createElement(
+              Stack, { spacing: 1.5 },
+              results.map((meeting) =>
+                React.createElement(
+                  Card, {
+                    key: meeting.id,
+                    className: 'meeting-card',
+                    sx: {
+                      borderRadius: '12px',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                      transition: 'all 0.2s ease',
+                      '&:hover': { boxShadow: '0 4px 12px rgba(0,0,0,0.06)' },
+                      cursor: 'pointer',
+                    },
+                    onClick: () => {
+                      dispatch({ type: 'SET_CURRENT_MEETING', payload: meeting.id });
+                      dispatch({ type: 'SET_VIEW', payload: 'detail' });
+                    }
+                  },
+                  React.createElement(
+                    CardContent, { sx: { p: 2.5 } },
+                    React.createElement(
+                      Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 1 } },
+                      React.createElement(
+                        Box, { sx: { flex: 1, minWidth: 0 } },
+                        React.createElement(
+                          Typography, { variant: 'h6', fontWeight: 600, noWrap: true },
+                          meeting.title || 'Untitled Meeting'
+                        ),
+                        React.createElement(
+                          Typography, { variant: 'caption', color: 'text.secondary', display: 'block' },
+                          `${formatDateTime(meeting.date)} · ${formatTime(meeting.duration || 0)}`
+                        ),
+                        React.createElement(
+                          Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 } },
+                          (meeting.tags || []).slice(0, 4).map((tag) =>
+                            React.createElement(Chip, {
+                              key: tag,
+                              label: tag,
+                              size: 'small',
+                              sx: { height: 20, fontSize: '0.6rem', borderRadius: '4px' }
+                            })
+                          )
+                        ),
+                        meeting.transcript && React.createElement(
+                          Typography, {
+                            variant: 'caption',
+                            color: 'text.secondary',
+                            sx: {
+                              display: 'block',
+                              mt: 0.5,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '100%',
+                            }
+                          },
+                          truncate(meeting.transcript, 120)
+                        )
+                      ),
+                      React.createElement(
+                        IconButton, { size: 'small', onClick: (e) => {
+                            e.stopPropagation();
+                            dispatch({ type: 'SET_CURRENT_MEETING', payload: meeting.id });
+                            dispatch({ type: 'SET_VIEW', payload: 'detail' });
+                          }
+                        },
+                        React.createElement(LaunchIcon, { fontSize: 'small' })
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ============================================================
+    //  SETTINGS COMPONENT
+    // ============================================================
+    const Settings = () => {
+      const { state, dispatch } = useApp();
+      const [settings, setSettings] = useState(state.settings);
+
+      const handleChange = (key, value) => {
+        const updated = { ...settings, [key]: value };
+        setSettings(updated);
+        dispatch({ type: 'SET_SETTINGS', payload: updated });
+      };
+
+      return React.createElement(
+        Box, { className: 'fade-in-up' },
+        React.createElement(
+          Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px', mb: 3 } },
+          'Settings'
+        ),
+        React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              mb: 3,
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              'Gemini API Configuration'
+            ),
+            React.createElement(
+              TextField, {
+                fullWidth: true,
+                label: 'Gemini API Key',
+                type: 'password',
+                value: settings.geminiApiKey || '',
+                onChange: (e) => handleChange('geminiApiKey', e.target.value),
+                placeholder: 'Enter your Gemini API key',
+                variant: 'outlined',
+                size: 'small',
+                sx: { mb: 2 },
+                helperText: 'Get your API key from Google AI Studio. The key is stored locally.'
+              }
+            ),
+            React.createElement(
+              Typography, { variant: 'body2', color: 'text.secondary', sx: { mb: 2 } },
+              'The Gemini API is used to generate meeting summaries, action items, and insights.'
+            ),
+            React.createElement(
+              Divider, { sx: { my: 2 } }
+            ),
+            React.createElement(
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              'Supabase Configuration'
+            ),
+            React.createElement(
+              TextField, {
+                fullWidth: true,
+                label: 'Supabase URL',
+                value: settings.supabaseUrl || '',
+                onChange: (e) => handleChange('supabaseUrl', e.target.value),
+                placeholder: 'https://your-project.supabase.co',
+                variant: 'outlined',
+                size: 'small',
+                sx: { mb: 2 },
+              }
+            ),
+            React.createElement(
+              TextField, {
+                fullWidth: true,
+                label: 'Supabase Anon Key',
+                type: 'password',
+                value: settings.supabaseAnonKey || '',
+                onChange: (e) => handleChange('supabaseAnonKey', e.target.value),
+                placeholder: 'Enter your Supabase anon key',
+                variant: 'outlined',
+                size: 'small',
+                sx: { mb: 2 },
+              }
+            ),
+            React.createElement(
+              TextField, {
+                fullWidth: true,
+                label: 'Storage Bucket Name',
+                value: settings.storageBucket || 'zynasty.storage',
+                onChange: (e) => handleChange('storageBucket', e.target.value),
+                placeholder: 'zynasty.storage',
+                variant: 'outlined',
+                size: 'small',
+                sx: { mb: 2 },
+                helperText: 'The bucket where audio recordings will be stored.'
+              }
+            ),
+            React.createElement(
+              Divider, { sx: { my: 2 } }
+            ),
+            React.createElement(
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              'Preferences'
+            ),
+            React.createElement(
+              Stack, { spacing: 2 },
+              React.createElement(
+                FormControl, { fullWidth: true, size: 'small' },
+                React.createElement(InputLabel, null, 'Language'),
+                React.createElement(
+                  Select, {
+                    value: settings.language || 'en-US',
+                    label: 'Language',
+                    onChange: (e) => handleChange('language', e.target.value),
+                  },
+                  React.createElement(MenuItem, { value: 'en-US' }, 'English (US)'),
+                  React.createElement(MenuItem, { value: 'en-GB' }, 'English (UK)'),
+                  React.createElement(MenuItem, { value: 'es' }, 'Spanish'),
+                  React.createElement(MenuItem, { value: 'fr' }, 'French'),
+                  React.createElement(MenuItem, { value: 'de' }, 'German'),
+                  React.createElement(MenuItem, { value: 'zh' }, 'Chinese'),
+                  React.createElement(MenuItem, { value: 'ja' }, 'Japanese'),
+                )
+              ),
+              React.createElement(
+                FormControl, { fullWidth: true, size: 'small' },
+                React.createElement(InputLabel, null, 'AI Model'),
+                React.createElement(
+                  Select, {
+                    value: settings.aiModel || 'gemini-flash',
+                    label: 'AI Model',
+                    onChange: (e) => handleChange('aiModel', e.target.value),
+                  },
+                  React.createElement(MenuItem, { value: 'gemini-flash' }, 'Gemini 1.5 Flash'),
+                  React.createElement(MenuItem, { value: 'gemini-pro' }, 'Gemini 1.5 Pro'),
+                )
+              ),
+              React.createElement(
+                FormControlLabel, {
+                  control: React.createElement(Switch, {
+                    checked: settings.autoSummary !== false,
+                    onChange: (e) => handleChange('autoSummary', e.target.checked),
+                  }),
+                  label: 'Auto-generate summary after recording'
+                }
+              )
+            )
+          )
+        ),
+        React.createElement(
+          Card, {
+            sx: {
+              borderRadius: '16px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              'Storage'
+            ),
+            React.createElement(
+              Stack, { spacing: 1.5 },
+              React.createElement(
+                Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                React.createElement(
+                  Typography, { variant: 'body2' },
+                  `Total Meetings: ${state.meetings.length}`
+                ),
+                React.createElement(
+                  Button, {
+                    variant: 'outlined',
+                    size: 'small',
+                    color: 'error',
+                    onClick: () => {
+                      if (confirm('Delete all meetings? This cannot be undone.')) {
+                        dispatch({
+                          type: 'SET_SNACKBAR',
+                          payload: { message: 'Clear all feature coming soon.', severity: 'info' }
+                        });
+                      }
+                    }
+                  },
+                  'Clear All'
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ============================================================
+    //  MAIN APP
+    // ============================================================
+    const App = () => {
+      const { state, initialized } = useApp();
+      const themeMode = state.darkMode ? 'dark' : 'light';
+
+      const theme = useMemo(() => {
+        const base = createTheme({
+          palette: {
+            mode: themeMode,
+            primary: {
+              main: '#6C5CE7',
+              light: '#A29BFE',
+              dark: '#4A3DBF',
+            },
+            secondary: {
+              main: '#00CEC9',
+              light: '#55EFC4',
+              dark: '#00B894',
+            },
+            error: { main: '#E17055' },
+            warning: { main: '#FDCB6E' },
+            info: { main: '#74B9FF' },
+            success: { main: '#00B894' },
+            background: {
+              default: themeMode === 'dark' ? '#0f1117' : '#f5f7fb',
+              paper: themeMode === 'dark' ? '#1a1d27' : '#ffffff',
+            },
+            text: {
+              primary: themeMode === 'dark' ? '#e8edf2' : '#1a1a2e',
+              secondary: themeMode === 'dark' ? '#8b92a5' : '#5a5a7a',
+            },
+          },
+          typography: {
+            fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
+            h4: { fontWeight: 700, letterSpacing: '-0.02em' },
+            h5: { fontWeight: 600, letterSpacing: '-0.01em' },
+            h6: { fontWeight: 600 },
+            button: { textTransform: 'none', fontWeight: 600 },
+          },
+          shape: { borderRadius: 12 },
+          components: {
+            MuiCard: {
+              styleOverrides: {
+                root: {
+                  borderRadius: 16,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  border: '1px solid',
+                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                  transition: 'box-shadow 0.2s ease, transform 0.2s ease',
+                }
+              }
+            },
+            MuiButton: {
+              styleOverrides: {
+                root: {
+                  borderRadius: 12,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                },
+                contained: {
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                  '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.12)' },
+                }
+              }
+            },
+            MuiAppBar: {
+              styleOverrides: {
+                root: {
+                  backgroundColor: themeMode === 'dark' ? 'rgba(15,17,23,0.85)' : 'rgba(255,255,255,0.85)',
+                  backdropFilter: 'blur(20px)',
+                  borderBottom: '1px solid',
+                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                }
+              }
+            },
+            MuiDrawer: {
+              styleOverrides: {
+                paper: {
+                  backgroundColor: themeMode === 'dark' ? '#141720' : '#ffffff',
+                  borderRight: '1px solid',
+                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                }
+              }
+            },
+            MuiChip: {
+              styleOverrides: {
+                root: {
+                  borderRadius: 8,
+                  fontWeight: 500,
+                }
+              }
+            },
+            MuiListItemButton: {
+              styleOverrides: {
+                root: {
+                  borderRadius: 12,
+                  '&.Mui-selected': {
+                    backgroundColor: 'rgba(108,92,231,0.12)',
+                    '&:hover': { backgroundColor: 'rgba(108,92,231,0.18)' },
+                  }
+                }
+              }
+            },
+            MuiFab: {
+              styleOverrides: {
+                root: {
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+                }
+              }
+            },
+            MuiTabs: {
+              styleOverrides: {
+                indicator: {
+                  height: 3,
+                  borderRadius: '3px 3px 0 0',
+                  backgroundColor: '#6C5CE7',
+                }
+              }
+            },
+            MuiTab: {
+              styleOverrides: {
+                root: {
+                  textTransform: 'none',
+                  fontWeight: 500,
+                  '&.Mui-selected': {
+                    fontWeight: 600,
+                  }
+                }
+              }
+            }
+          }
+        });
+        return responsiveFontSizes(base);
+      }, [themeMode]);
+
+      if (!initialized) {
+        return React.createElement(
+          Box, { sx: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' } },
+          React.createElement(CircularProgress)
+        );
+      }
+
+      const renderView = () => {
+        switch (state.view) {
+          case 'dashboard':
+            return React.createElement(Dashboard);
+          case 'new':
+            return React.createElement(NewMeeting);
+          case 'history':
+            return React.createElement(MeetingHistory);
+          case 'detail':
+            return React.createElement(MeetingDetail);
+          case 'search':
+            return React.createElement(SearchPage);
+          case 'settings':
+            return React.createElement(Settings);
+          default:
+            return React.createElement(Dashboard);
+        }
+      };
+
+      return React.createElement(
+        ThemeProvider, { theme },
+        React.createElement(CssBaseline),
+        React.createElement(
+          Box, {
+            className: state.darkMode ? 'dark-mode' : '',
+            sx: { minHeight: '100vh', bgcolor: 'background.default' }
+          },
+          React.createElement(
+            Layout, null,
+            renderView()
+          ),
+          React.createElement(
+            Snackbar, {
+              open: state.snackbar.open,
+              autoHideDuration: 4000,
+              onClose: () => { dispatch({ type: 'CLOSE_SNACKBAR' }); },
+              anchorOrigin: { vertical: 'bottom', horizontal: 'right' },
+              sx: { maxWidth: 400 }
+            },
+            React.createElement(
+              Alert, {
+                onClose: () => { dispatch({ type: 'CLOSE_SNACKBAR' }); },
+                severity: state.snackbar.severity || 'info',
+                variant: 'filled',
+                sx: { borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }
+              },
+              state.snackbar.message
+            )
+          )
+        )
+      );
+    };
+
+    // ============================================================
+    //  BOOTSTRAP - RENDER THE APPLICATION
+    // ============================================================
+    const root = createRoot(document.getElementById('root'));
+    root.render(
+      React.createElement(
+        React.StrictMode, null,
+        React.createElement(
+          AppProvider, null,
+          React.createElement(App)
+        )
+      )
+    );
+  </script>
+</body>
+</html>
