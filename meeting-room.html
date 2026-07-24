@@ -488,7 +488,20 @@
 
     const { responsiveFontSizes } = window['@mui/material/styles'];
 
-    const icons = window['@mui/icons-material'];
+    const __PlaceholderIcon = (props) => React.createElement('span', Object.assign({
+      style: { display: 'inline-block', width: '1em', height: '1em', borderRadius: '50%', border: '1.5px solid currentColor', verticalAlign: 'middle' }
+    }, props));
+    const __iconsFallback = new Proxy({}, { get: () => __PlaceholderIcon });
+    // Never trust the async module bridge's timing (top-level await
+    // delaying DOMContentLoaded is spec-correct on a real HTTPS
+    // deployment, but some mobile/local-file (content://, file://)
+    // browser contexts handle dynamic ESM import differently). Fall
+    // back to placeholder icons synchronously so this line can never
+    // throw, satisfying "continue in offline mode, never block".
+    const icons = window['@mui/icons-material'] || __iconsFallback;
+    if (!window['@mui/icons-material'] && window.__markStep) {
+      window.__markStep('Material UI Icons Loaded', false, 'Module bridge had not finished by the time app code ran - using placeholder icons');
+    }
     const {
       Dashboard: DashboardIcon,
       Mic: MicIcon,
@@ -1692,7 +1705,7 @@
           `Welcome back! You have ${stats.total} meetings recorded.`
         ),
         React.createElement(
-          Grid, { container, spacing: 2, sx: { mb: 3 } },
+          Grid, { container: true, spacing: 2, sx: { mb: 3 } },
           statCards.map((stat, i) =>
             React.createElement(
               Grid, { key: i, size: { xs: 6, sm: 6, md: 3 } },
@@ -2431,7 +2444,7 @@
               )
             ),
             React.createElement(
-              Grid, { container, spacing: 2 },
+              Grid, { container: true, spacing: 2 },
               React.createElement(
                 Grid, { size: 12 },
                 React.createElement(
@@ -3049,7 +3062,7 @@
             )
           ),
           React.createElement(
-            Grid, { container, spacing: 2 },
+            Grid, { container: true, spacing: 2 },
             React.createElement(
               Grid, { size: { xs: 12, md: 6 } },
               React.createElement(
@@ -3176,7 +3189,7 @@
             )
           ),
           React.createElement(
-            Grid, { container, spacing: 2 },
+            Grid, { container: true, spacing: 2 },
             summary.people?.length > 0 && React.createElement(
               Grid, { size: { xs: 12, sm: 6 } },
               React.createElement(
@@ -3387,7 +3400,7 @@
               'Meeting Notes'
             ),
             React.createElement(
-              Grid, { container, spacing: 2 },
+              Grid, { container: true, spacing: 2 },
               summary.bulletNotes?.length > 0 && React.createElement(
                 Grid, { size: 12 },
                 React.createElement(
