@@ -359,15 +359,20 @@ try{
   }
 }catch(e){ console.error("Could not initialize Cashfree SDK", e); }
 
-// AMC (Annual Maintenance Contract) plan amount, in rupees. Deliberately
-// left unset here — set this to your actual configured plan fee (the
-// source document quoted ₹15,499 + applicable taxes, but pricing was
-// intentionally left out of this page's content per instruction). While
-// this is 0/unset, the AMC Plan page shows a "contact us to activate"
-// message instead of a broken Pay button, same fallback pattern already
-// used for the Production payment amount below.
-const AMC_PLAN_AMOUNT = 0;
+// AMC (Annual Maintenance Contract) plan amount, in rupees. Studio-configurable —
+// read live from shared storage (set via Studio Portal's AMC Requests screen)
+// rather than hardcoded here. While unset/zero, the AMC Plan page shows a
+// "contact us to activate" message instead of a broken Pay button, same
+// fallback pattern already used for the Production payment amount below.
+const AMC_PLAN_PRICE_KEY = "amc-plan-price";
 const AMC_PLAN_VALIDITY_MONTHS = 12;
+async function loadAmcPlanPrice(){
+  try{
+    const res = await window.storage.get(AMC_PLAN_PRICE_KEY, true);
+    const n = res && res.value ? Number(res.value) : 0;
+    state.amcPlanPrice = (!isNaN(n) && n > 0) ? n : 0;
+  }catch(e){ state.amcPlanPrice = state.amcPlanPrice || 0; }
+}
 const DEFAULT_WELCOME_MESSAGE = `Welcome to Zynasty Design.
 
 We are happy to have you here.
@@ -568,7 +573,7 @@ function generateProductionAgreementPdf(project){
   doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Production-Stage-Agreement.pdf");
 }
 
-let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcView: "home", amcJustActivated: false, amcFormPreset: null };
+let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcView: "home", amcJustActivated: false, amcFormPreset: null, amcPlanPrice: 0 };
 const AMC_KEY = "amc_requests";
 
 // Remembers which project this browser is currently looking at, so a reload
@@ -921,7 +926,7 @@ function render(){
 const AMC_PRIORITIES = ["Low","Normal","Urgent"];
 const AMC_STATUSES = ["Pending","Assigned","In Progress","Completed"];
 const AMC_STATUS_COLORS = { "Pending":"#B5654A", "Assigned":"#C08A4E", "In Progress":"#8C8F5E", "Completed":"#5F7A56" };
-const AMC_SERVICE_TYPES = ["General Service","Breakdown Service"];
+const AMC_SERVICE_TYPES = ["General Service","Breakdown Service","AMC"];
 const AMC_TIME_SLOTS = ["Morning (9 AM – 12 PM)","Afternoon (12 PM – 4 PM)","Evening (4 PM – 7 PM)"];
 const AMC_MAX_IMAGES = 4;
 
@@ -986,7 +991,7 @@ function renderAmcPlan(p){
       <h3>What's Included</h3>
       <ul style="font-size:14px;line-height:1.8;padding-left:20px;margin-bottom:18px;">
         <li>Labour-free service throughout the validity of the plan.</li>
-        <li>Two preventive maintenance visits per year (every 6 months).</li>
+        <li>One preventive maintenance visit per year.</li>
         <li>Hardware inspection & servicing of hinges, channels, handles, locks, and other installed hardware.</li>
         <li>Interior care & cleaning, including basic cleaning and lubrication of hardware components.</li>
         <li>Preventive maintenance to identify wear and tear early and reduce major repair costs.</li>
@@ -1002,7 +1007,7 @@ function renderAmcPlan(p){
       </ul>
 
       <h3>Pricing</h3>
-      <div style="font-size:14px;line-height:1.7;margin-bottom:18px;color:var(--slate);">Contact our team for current plan pricing.</div>
+      <div style="font-size:14px;line-height:1.7;margin-bottom:18px;">${(state.amcPlanPrice && state.amcPlanPrice > 0) ? `₹${escapeHtml(String(state.amcPlanPrice))} + applicable taxes, per year` : `<span style="color:var(--slate);">Contact our team for current plan pricing.</span>`}</div>
 
       <h3>Validity</h3>
       <div style="font-size:14px;line-height:1.7;margin-bottom:18px;">Valid for ${AMC_PLAN_VALIDITY_MONTHS} months from the date of activation.</div>
@@ -1692,14 +1697,8 @@ function renderClient(){
         <h1>${escapeHtml(p.projectName)}</h1>
         <div class="addr">${escapeHtml(p.propertyAddress)||""}</div>
         ${isLost ? "" : renderRuler(p.status,true)}
-        ${p.status === "Completed" ? `
-        <div style="margin-top:14px;">
-          ${state.clientView === "amc"
-            ? `<button class="btn ghost" id="amcBackToProjectBtn" style="font-size:13px;padding:7px 14px;">← Back to Project</button>`
-            : `<button class="btn ghost" id="amcOpenBtn" style="font-size:13px;padding:7px 14px;">🛠️ Support & AMC${state.amcRequests.length ? ` (${state.amcRequests.length})` : ""}</button>`}
-        </div>` : ""}
       </div>
-      ${state.clientView === "amc" && p.status === "Completed" ? renderAmcSection(p) : (isLost ? lostContent : (isInDiscussion ? onboardingContent : (isOnboardingStage ? onboardingWizardContent : (isDesignPhase ? designWizardContent : laterContent))))}
+      ${p.status === "Completed" ? renderAmcSection(p) : (isLost ? lostContent : (isInDiscussion ? onboardingContent : (isOnboardingStage ? onboardingWizardContent : (isDesignPhase ? designWizardContent : laterContent))))}
     `;
   }
   return `
@@ -1737,13 +1736,9 @@ async function lookupProjectByCode(code){
     state.clientView = "project";
     state.amcView = "home";
     saveClientSession(code);
-    if(match.status === "Completed" && !match.handoverScreenSeen){
-      state.clientView = "amc";
-      match.handoverScreenSeen = true;
-      updateClientProject(code, { handoverScreenSeen: true }).catch(()=>{});
-    }
     render();
     await loadAmcRequests();
+    await loadAmcPlanPrice();
     try{
       const res = await window.storage.get("quotation-pdf:" + match.id, true);
       state.clientQuotationPdf = res && res.value ? res.value : null;
@@ -1769,11 +1764,6 @@ function attachClientHandlers(){
   const back = document.getElementById("backBtn");
   if(back) back.onclick = ()=>{ state.clientResult=null; state.clientCode=""; state.clientError=""; state.clientQuotationPdf=null; state.clientFinalQuotationPdf=null; state.onboardingStep=null; state.designStep=null; state.productionStep=null; clearClientSession(); render(); };
 
-  const amcOpenBtn = document.getElementById("amcOpenBtn");
-  if(amcOpenBtn) amcOpenBtn.onclick = ()=>{ state.clientView = "amc"; state.amcView = "home"; state.amcSelectedId = null; state.amcFormPreset = null; render(); };
-  const amcBackToProjectBtn = document.getElementById("amcBackToProjectBtn");
-  if(amcBackToProjectBtn) amcBackToProjectBtn.onclick = ()=>{ state.clientView = "project"; render(); };
-
   // Handover home screen navigation
   const amcGoSupportBtn = document.getElementById("amcGoSupportBtn");
   if(amcGoSupportBtn) amcGoSupportBtn.onclick = ()=>{ state.amcFormPreset = null; state.amcView = "form"; render(); };
@@ -1796,7 +1786,7 @@ function attachClientHandlers(){
     payAmcCashfreeBtn.onclick = async ()=>{
       const errEl = document.getElementById("amcCashfreeErrorMsg");
       if(errEl) errEl.style.display = "none";
-      if(!AMC_PLAN_AMOUNT || AMC_PLAN_AMOUNT <= 0){
+      if(!state.amcPlanPrice || state.amcPlanPrice <= 0){
         if(errEl){ errEl.textContent = "AMC activation isn't available for online payment yet — please contact your designer."; errEl.style.display = "block"; }
         return;
       }
@@ -1813,7 +1803,7 @@ function attachClientHandlers(){
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             projectId: p.id,
-            amount: AMC_PLAN_AMOUNT,
+            amount: state.amcPlanPrice,
             customerName: formatClientName(p) || p.clientName || "Customer",
             customerEmail: p.clientEmail || "",
             customerPhone: p.clientPhone || ""

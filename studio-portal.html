@@ -695,7 +695,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -869,6 +869,30 @@ async function loadAmcRequests(){
     state.amcRequests = [];
   }
   state.amcRequestsLoaded = true;
+}
+
+const AMC_PLAN_PRICE_KEY = "amc-plan-price";
+async function loadAmcPlanPrice(){
+  try{
+    const res = await window.storage.get(AMC_PLAN_PRICE_KEY, true);
+    const n = res && res.value ? Number(res.value) : 0;
+    state.amcPlanPrice = (!isNaN(n) && n > 0) ? n : 0;
+  }catch(e){
+    state.amcPlanPrice = state.amcPlanPrice || 0;
+  }
+  state.amcPlanPriceLoaded = true;
+}
+
+async function saveAmcPlanPrice(price){
+  try{
+    const result = await window.storage.set(AMC_PLAN_PRICE_KEY, String(price), true);
+    if(!result) showToast("Could not save the AMC plan price. Please try again.", true);
+    return !!result;
+  }catch(e){
+    console.error("Storage error", e);
+    showToast("Could not save the AMC plan price. Please try again.", true);
+    return false;
+  }
 }
 
 async function saveDesigners(excludeIds){
@@ -3302,6 +3326,17 @@ function renderAmcRequests(){
     state.amcSelectedId = null;
   }
 
+  const priceBox = `
+    <div class="portal-box" style="max-width:420px;margin-bottom:18px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--slate);margin-bottom:8px;">AMC Plan Price</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:14px;">₹</span>
+        <input type="number" id="amcPlanPriceInput" min="0" step="1" value="${escapeAttr(state.amcPlanPrice || "")}" placeholder="e.g. 15499" style="flex:1;">
+        <button type="button" class="btn" id="amcPlanPriceSaveBtn">Save</button>
+      </div>
+      <div style="font-size:12px;color:var(--slate);margin-top:6px;">Shown to clients on the AMC Plan page and used as the Cashfree payment amount when they activate.</div>
+    </div>`;
+
   const filter = state.amcStatusFilter || "all";
   const list = (state.amcRequests||[]).filter(r=> filter==="all" || r.status===filter);
   const sorted = [...list].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
@@ -3316,7 +3351,7 @@ function renderAmcRequests(){
     </div>`;
 
   if(!sorted.length){
-    return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + toolbar + `
+    return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + priceBox + toolbar + `
       <div class="empty">
         <div class="display">No service requests${filter!=="all" ? ` with status "${escapeHtml(filter)}"` : ""}</div>
         <div>Requests clients raise from their portal will show up here.</div>
@@ -3340,7 +3375,7 @@ function renderAmcRequests(){
       </div>
     </div>`).join("");
 
-  return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + toolbar + `<div class="grid">${cards}</div>`;
+  return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + priceBox + toolbar + `<div class="grid">${cards}</div>`;
 }
 
 function renderAmcDetail(ticket){
@@ -3401,6 +3436,27 @@ function renderAmcDetail(ticket){
 }
 
 function attachAmcRequestsHandlers(){
+  const priceSaveBtn = document.getElementById("amcPlanPriceSaveBtn");
+  if(priceSaveBtn){
+    priceSaveBtn.onclick = async ()=>{
+      const input = document.getElementById("amcPlanPriceInput");
+      const value = Number(input.value);
+      if(isNaN(value) || value < 0){
+        showToast("Please enter a valid price.", true);
+        return;
+      }
+      priceSaveBtn.disabled = true;
+      priceSaveBtn.textContent = "Saving…";
+      const ok = await saveAmcPlanPrice(value);
+      if(ok){
+        state.amcPlanPrice = value;
+        showToast("AMC plan price saved.", false);
+      }
+      priceSaveBtn.disabled = false;
+      priceSaveBtn.textContent = "Save";
+    };
+  }
+
   const filterSelect = document.getElementById("amcStatusFilterSelect");
   if(filterSelect) filterSelect.onchange = (e)=>{ state.amcStatusFilter = e.target.value; render(); };
 
@@ -4481,6 +4537,7 @@ async function refreshProjectsIfSafe(){
   loadProjects();
   loadDesigners();
   loadAmcRequests();
+  loadAmcPlanPrice();
   setInterval(refreshProjectsIfSafe, 8000);
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refreshProjectsIfSafe(); });
   window.addEventListener("focus", refreshProjectsIfSafe);

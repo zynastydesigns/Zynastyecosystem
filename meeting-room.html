@@ -5,6 +5,171 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Meeting Assistant (Supabase + Storage + RPC)</title>
 
+  <!-- ============================================================
+       STARTUP DIAGNOSTICS BOOTSTRAP
+       Loaded first, before any dependency, using plain JS (no Babel,
+       no React) so it can run and report even if everything else
+       downstream fails to parse or load.
+  ============================================================ -->
+  <script>
+    (function () {
+      window.__startup = {
+        steps: [],
+        rendered: false,
+        watchdogFired: false,
+      };
+
+      function markStep(step, ok, detail) {
+        window.__startup.steps.push({
+          step: step,
+          ok: !!ok,
+          detail: detail || '',
+          time: new Date().toISOString(),
+        });
+        var tag = ok ? '\u2713' : '\u2717';
+        if (ok) {
+          console.log('[Startup] ' + tag + ' ' + step + (detail ? ' - ' + detail : ''));
+        } else {
+          console.error('[Startup] ' + tag + ' ' + step + (detail ? ' - ' + detail : ''));
+        }
+      }
+      window.__markStep = markStep;
+
+      markStep('HTML Loaded', true);
+
+      function escapeHtml(str) {
+        return String(str == null ? '' : str).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function suggestFix(message, filename) {
+        var m = (message || '').toLowerCase();
+        if (m.indexOf('unexpected identifier') !== -1 || m.indexOf('unexpected token') !== -1) {
+          return 'There is a JavaScript syntax error in the inline app script. Check the file/line indicated below for a typo, mismatched bracket, or invalid syntax construct (e.g. using import-style "X as Y" inside a plain object literal instead of "X: Y").';
+        }
+        if (m.indexOf('is not defined') !== -1) {
+          return 'A variable or library global is being referenced before it was loaded or defined. Check that the corresponding <script> tag (React, MUI, Emotion, Supabase, Babel) loaded successfully and appears before the app script, and that CDN network access is not blocked.';
+        }
+        if (m.indexOf('failed to fetch') !== -1 || m.indexOf('networkerror') !== -1 || m.indexOf('load') !== -1) {
+          return 'A network request or external script failed to load. Check the Network tab for failed requests (CDN scripts, fonts, Supabase, Gemini) and verify CORS/MIME type/HTTP status.';
+        }
+        if (m.indexOf('cannot read propert') !== -1 || m.indexOf('cannot read of undefined') !== -1 || m.indexOf('undefined is not an object') !== -1) {
+          return 'Code is trying to access a property on something that is undefined/null — often caused by a library (MUI/Emotion/Supabase) not finishing initialization before the app code runs, or a missing config value.';
+        }
+        return 'Check the stack trace and file/line below, open browser DevTools Console + Network tabs, and verify every startup step above shows a checkmark.';
+      }
+
+      window.__showDiagnostic = function (info) {
+        info = info || {};
+        try {
+          var root = document.getElementById('root');
+          if (!root) return;
+          var stepsHtml = window.__startup.steps.map(function (s) {
+            return '<div style="display:flex;gap:8px;padding:4px 0;font-family:monospace;font-size:13px;">' +
+              '<span style="color:' + (s.ok ? '#00b894' : '#e17055') + ';font-weight:700;">' + (s.ok ? '\u2713' : '\u2717') + '</span>' +
+              '<span>' + escapeHtml(s.step) + (s.detail ? ' <span style="color:#8b92a5;">(' + escapeHtml(s.detail) + ')</span>' : '') + '</span>' +
+              '</div>';
+          }).join('');
+
+          var message = escapeHtml(info.message || 'Unknown startup error');
+          var filename = escapeHtml(info.filename || 'unknown');
+          var lineno = info.lineno != null ? info.lineno : '?';
+          var colno = info.colno != null ? info.colno : '?';
+          var stack = escapeHtml(info.stack || '(no stack trace available)');
+          var failedStep = escapeHtml(info.failedStep || 'Unknown step');
+          var fix = escapeHtml(suggestFix(info.message, info.filename));
+
+          root.innerHTML =
+            '<div style="max-width:760px;width:92vw;margin:32px auto;text-align:left;background:#fff;border:1px solid #f0d0d0;border-radius:16px;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,0.08);font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#1a1a2e;max-height:90vh;overflow:auto;">' +
+              '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">' +
+                '<div style="width:36px;height:36px;border-radius:50%;background:#fdecea;color:#e17055;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;">!</div>' +
+                '<div style="font-size:18px;font-weight:700;">AI Meeting Assistant failed to start</div>' +
+              '</div>' +
+              '<div style="font-size:13px;color:#5a5a7a;margin-bottom:16px;">The app never finished loading. Details below should point to the exact cause.</div>' +
+
+              '<div style="margin-bottom:16px;">' +
+                '<div style="font-weight:600;font-size:13px;margin-bottom:6px;">Startup steps</div>' +
+                '<div style="background:#f5f7fb;border-radius:10px;padding:10px 14px;">' + (stepsHtml || '<span style="color:#8b92a5;">No steps recorded before failure.</span>') + '</div>' +
+              '</div>' +
+
+              '<div style="margin-bottom:12px;">' +
+                '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Failed step</div>' +
+                '<div style="font-family:monospace;font-size:13px;color:#e17055;">' + failedStep + '</div>' +
+              '</div>' +
+              '<div style="margin-bottom:12px;">' +
+                '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Error message</div>' +
+                '<div style="font-family:monospace;font-size:13px;background:#fdecea;padding:8px 10px;border-radius:8px;white-space:pre-wrap;">' + message + '</div>' +
+              '</div>' +
+              '<div style="margin-bottom:12px;">' +
+                '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">File / Line / Column</div>' +
+                '<div style="font-family:monospace;font-size:13px;">' + filename + ' : ' + lineno + ' : ' + colno + '</div>' +
+              '</div>' +
+              '<div style="margin-bottom:12px;">' +
+                '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Stack trace</div>' +
+                '<pre style="font-family:monospace;font-size:11px;background:#f5f7fb;padding:10px;border-radius:8px;white-space:pre-wrap;max-height:220px;overflow:auto;">' + stack + '</pre>' +
+              '</div>' +
+              '<div style="margin-bottom:4px;">' +
+                '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Suggested fix</div>' +
+                '<div style="font-size:13px;color:#1a1a2e;background:#eafaf1;padding:8px 10px;border-radius:8px;">' + fix + '</div>' +
+              '</div>' +
+              '<div style="margin-top:16px;display:flex;gap:8px;">' +
+                '<button onclick="location.reload()" style="cursor:pointer;border:none;border-radius:10px;padding:8px 16px;background:#6C5CE7;color:#fff;font-weight:600;font-size:13px;">Reload</button>' +
+              '</div>' +
+            '</div>';
+        } catch (renderErr) {
+          console.error('Failed to render diagnostic screen', renderErr);
+        }
+      };
+
+      window.onerror = function (message, filename, lineno, colno, error) {
+        markStep('Uncaught error', false, message);
+        window.__showDiagnostic({
+          message: message,
+          filename: filename,
+          lineno: lineno,
+          colno: colno,
+          stack: error && error.stack ? error.stack : null,
+          failedStep: window.__startup.steps.length ? window.__startup.steps[window.__startup.steps.length - 1].step : 'Script execution',
+        });
+        return false; // still let it log to console
+      };
+
+      window.onunhandledrejection = function (event) {
+        var reason = event.reason;
+        var message = reason && reason.message ? reason.message : String(reason);
+        markStep('Unhandled promise rejection', false, message);
+        window.__showDiagnostic({
+          message: message,
+          filename: '(async / promise)',
+          lineno: null,
+          colno: null,
+          stack: reason && reason.stack ? reason.stack : null,
+          failedStep: 'Unhandled promise rejection',
+        });
+      };
+
+      // Watchdog: if the real app hasn't signaled a successful render
+      // within 12s of HTML load, something is stuck (e.g. a CDN script
+      // silently failed to load, or an init awaited forever). Show a
+      // diagnostic instead of leaving the spinner forever.
+      window.setTimeout(function () {
+        if (!window.__startup.rendered) {
+          window.__startup.watchdogFired = true;
+          markStep('Watchdog timeout (12s)', false, 'App did not signal a successful render in time');
+          window.__showDiagnostic({
+            message: 'Startup watchdog timed out after 12 seconds. The app never reported a successful render.',
+            filename: 'Meeting_summary_app.html',
+            lineno: null,
+            colno: null,
+            stack: null,
+            failedStep: window.__startup.steps.length ? window.__startup.steps[window.__startup.steps.length - 1].step : 'Initial load',
+          });
+        }
+      }, 12000);
+    })();
+  </script>
+
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,20 +179,92 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
 
   <!-- React & ReactDOM -->
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"
+    onload="window.__markStep('React Loaded', true)"
+    onerror="window.__markStep('React Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load React from CDN', filename:'react.production.min.js', failedStep:'React Loaded'});"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"
+    onload="window.__markStep('ReactDOM Loaded', true)"
+    onerror="window.__markStep('ReactDOM Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load ReactDOM from CDN', filename:'react-dom.production.min.js', failedStep:'ReactDOM Loaded'});"></script>
 
   <!-- Babel Standalone -->
-  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"
+    onload="window.__markStep('Babel Loaded', true)"
+    onerror="window.__markStep('Babel Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load Babel Standalone from CDN', filename:'babel.min.js', failedStep:'Babel Loaded'});"></script>
 
   <!-- Emotion & MUI -->
-  <script src="https://cdn.jsdelivr.net/npm/@emotion/react@11.11.1/dist/emotion-react.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mui/material@5.14.20/umd/material-ui.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mui/icons-material@5.14.19/umd/material-ui-icons.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@emotion/react@11.11.1/dist/emotion-react.umd.min.js"
+    onload="window.__markStep('Emotion (react) Loaded', true)"
+    onerror="window.__markStep('Emotion (react) Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load @emotion/react from CDN', filename:'emotion-react.umd.min.js', failedStep:'Emotion Loaded'});"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js"
+    onload="window.__markStep('Emotion (styled) Loaded', true)"
+    onerror="window.__markStep('Emotion (styled) Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load @emotion/styled from CDN', filename:'emotion-styled.umd.min.js', failedStep:'Emotion Loaded'});"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mui/material@5.14.20/umd/material-ui.production.min.js"
+    onload="window.__markStep('Material UI Loaded', true)"
+    onerror="window.__markStep('Material UI Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load @mui/material from CDN', filename:'material-ui.production.min.js', failedStep:'Material UI Loaded'});"></script>
 
   <!-- Supabase JS -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"
+    onload="window.__markStep('Supabase JS Loaded', true)"
+    onerror="window.__markStep('Supabase JS Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load @supabase/supabase-js from CDN', filename:'supabase.min.js', failedStep:'Supabase JS Loaded'});"></script>
+
+  <!-- ============================================================
+       BRIDGE SCRIPT (native ES module - NOT processed by Babel)
+       The app code below expects window['@mui/material'],
+       window['@mui/material/styles'], and window['@mui/icons-material']
+       to exist. The MUI UMD CDN build actually exposes a single global
+       named `MaterialUI` (not those bracket keys), and @mui/icons-material
+       has never shipped a UMD/CDN build at all (v5+), so that CDN script
+       404s. This module runs after all classic <script> tags above have
+       executed (native module scripts are deferred, and always finish
+       before the DOMContentLoaded event that triggers Babel Standalone's
+       auto-transform of the app script below), so it reliably bridges
+       the globals before the app code runs.
+  ============================================================ -->
+  <script type="module">
+    // --- Bridge @mui/material -> the global the CDN script really sets ---
+    if (window.MaterialUI) {
+      window['@mui/material'] = window.MaterialUI;
+      window['@mui/material/styles'] = window.MaterialUI;
+      window.__markStep && window.__markStep('Material UI global bridged', true);
+    } else {
+      window.__markStep && window.__markStep('Material UI global bridged', false, 'window.MaterialUI was not set - check CDN load above');
+    }
+
+    // --- Load @mui/icons-material via a working ESM CDN (no UMD build exists) ---
+    const withTimeout = (promise, ms) => Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Icon module import timed out after ' + ms + 'ms')), ms)),
+    ]);
+
+    try {
+      // Genuine top-level await: per the HTML spec this delays this
+      // module script's "completion" (and therefore DOMContentLoaded,
+      // and therefore Babel Standalone's transform of the app script
+      // below, which runs on DOMContentLoaded) until this resolves.
+      const iconsModule = await withTimeout(
+        import('https://cdn.jsdelivr.net/npm/@mui/icons-material@5.14.19/+esm'),
+        8000
+      );
+      window['@mui/icons-material'] = iconsModule;
+      window.__markStep && window.__markStep('Material UI Icons Loaded', true, 'via ESM CDN');
+    } catch (e) {
+      console.warn('Icon module failed to load, falling back to placeholder icons (offline mode):', e);
+      window.__markStep && window.__markStep('Material UI Icons Loaded', false, (e && e.message) || 'ESM import failed');
+      // Fallback: return a harmless placeholder icon component for ANY
+      // requested icon name, so destructuring never crashes and the
+      // app still renders (just without real icon glyphs).
+      const PlaceholderIcon = (props) => {
+        return React.createElement('span', Object.assign({
+          style: { display: 'inline-block', width: '1em', height: '1em', borderRadius: '50%', border: '1.5px solid currentColor', verticalAlign: 'middle' }
+        }, props));
+      };
+      window['@mui/icons-material'] = new Proxy({}, {
+        get: () => PlaceholderIcon,
+      });
+    }
+
+    window.__iconsBridgeReady = true;
+  </script>
 
   <style>
     *,
@@ -174,6 +411,7 @@
       border-radius: 4px;
     }
   </style>
+  <script>window.__markStep && window.__markStep('CSS Loaded', true);</script>
 </head>
 <body>
   <div id="root">
@@ -184,6 +422,8 @@
   </div>
 
   <script type="text/babel">
+    window.__markStep && window.__markStep('JavaScript Loaded', true, 'App script began executing (Babel parse succeeded)');
+
     // ============================================================
     //  IMPORTS
     // ============================================================
@@ -240,7 +480,7 @@
       Fade,
       Zoom,
       Badge,
-      IconButton as MuiIconButton,
+      IconButton: MuiIconButton,
       Input,
       OutlinedInput,
       FormHelperText,
@@ -723,11 +963,20 @@
       async init() {
         if (this.useSupabase) {
           try {
-            const { error } = await this.supabase.from(this.tables.meetings).select('id').limit(1);
+            const withTimeout = (promise, ms) => Promise.race([
+              promise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase init timed out after ' + ms + 'ms')), ms)),
+            ]);
+            const { error } = await withTimeout(
+              this.supabase.from(this.tables.meetings).select('id').limit(1),
+              5000
+            );
             if (error) throw error;
+            if (window.__markStep) window.__markStep('Supabase Initialized', true);
             return true;
           } catch (e) {
             console.warn('Supabase connection failed, falling back to IndexedDB', e);
+            if (window.__markStep) window.__markStep('Supabase Initialized', false, e.message);
             this.useSupabase = false;
             return this.initIndexedDB();
           }
@@ -738,6 +987,14 @@
 
       initIndexedDB() {
         return new Promise((resolve, reject) => {
+          let settled = false;
+          const timeoutId = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            if (window.__markStep) window.__markStep('IndexedDB Initialized', false, 'Timed out after 5000ms');
+            reject(new Error('IndexedDB open timed out after 5000ms'));
+          }, 5000);
+
           const req = indexedDB.open(this.dbName, this.version);
           req.onupgradeneeded = (e) => {
             const db = e.target.result;
@@ -760,10 +1017,20 @@
             }
           };
           req.onsuccess = (e) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
             this.db = e.target.result;
+            if (window.__markStep) window.__markStep('IndexedDB Initialized', true);
             resolve(true);
           };
-          req.onerror = (e) => reject(e.target.error);
+          req.onerror = (e) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            if (window.__markStep) window.__markStep('IndexedDB Initialized', false, e.target.error && e.target.error.message);
+            reject(e.target.error);
+          };
         });
       }
 
@@ -977,6 +1244,10 @@
         let isMounted = true;
         let timeoutId = null;
 
+        if (window.__markStep) {
+          window.__markStep('Authentication Initialized', true, 'No auth system in this build (local/offline app)');
+        }
+
         const init = async () => {
           try {
             let settings = state.settings;
@@ -1007,16 +1278,21 @@
 
             if (settings.geminiApiKey) {
               geminiServiceRef.current = new GeminiService(settings.geminiApiKey);
+              if (window.__markStep) window.__markStep('Gemini Initialized', true);
+            } else if (window.__markStep) {
+              window.__markStep('Gemini Initialized', true, 'No API key configured yet - offline mode');
             }
 
             if (isMounted) setInitialized(true);
+            if (window.__markStep) window.__markStep('AppProvider Initialized', true);
           } catch (err) {
             console.error('Init error:', err);
+            if (window.__markStep) window.__markStep('AppProvider Initialized', false, err.message);
             if (isMounted) {
               setInitialized(true);
               dispatch({
                 type: 'SET_SNACKBAR',
-                payload: { message: 'Storage init error: ' + err.message, severity: 'error' }
+                payload: { message: 'Storage init error: ' + err.message + ' (continuing in offline mode)', severity: 'error' }
               });
             }
           }
@@ -1025,7 +1301,8 @@
         init();
         timeoutId = setTimeout(() => {
           if (isMounted && !initialized) {
-            console.warn('Init timed out, forcing render');
+            console.warn('Init timed out, forcing render in offline mode');
+            if (window.__markStep) window.__markStep('AppProvider Initialized', false, 'Timed out after 3000ms - forced offline mode');
             setInitialized(true);
           }
         }, 3000);
@@ -3629,6 +3906,48 @@
     };
 
     // ============================================================
+    //  ERROR BOUNDARY
+    // ============================================================
+    class AppErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null, errorInfo: null };
+      }
+
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+
+      componentDidCatch(error, errorInfo) {
+        console.error('React Error Boundary caught an error:', error, errorInfo);
+        if (window.__markStep) {
+          window.__markStep('React render error', false, error && error.message);
+        }
+        this.setState({ errorInfo });
+        if (window.__showDiagnostic) {
+          window.__showDiagnostic({
+            message: error && error.message,
+            filename: 'App component tree',
+            lineno: null,
+            colno: null,
+            stack: (error && error.stack ? error.stack : '') + (errorInfo && errorInfo.componentStack ? '\n\nComponent stack:' + errorInfo.componentStack : ''),
+            failedStep: 'React render (Error Boundary)',
+          });
+        }
+      }
+
+      render() {
+        if (this.state.hasError) {
+          // The diagnostic screen has already been rendered into #root
+          // by window.__showDiagnostic in componentDidCatch. Render
+          // nothing here to avoid fighting over the DOM.
+          return null;
+        }
+        return this.props.children;
+      }
+    }
+
+    // ============================================================
     //  MAIN APP
     // ============================================================
     const App = () => {
@@ -3765,6 +4084,15 @@
         return responsiveFontSizes(base);
       }, [themeMode]);
 
+      useEffect(() => {
+        if (!initialized) return;
+        window.__startup.rendered = true;
+        if (window.__markStep) {
+          window.__markStep('Routes Loaded', true);
+          window.__markStep('<App /> Rendered', true);
+        }
+      }, [initialized]);
+
       if (!initialized) {
         return React.createElement(
           Box, { sx: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' } },
@@ -3828,16 +4156,40 @@
     // ============================================================
     //  BOOTSTRAP - RENDER THE APPLICATION
     // ============================================================
-    const root = createRoot(document.getElementById('root'));
-    root.render(
-      React.createElement(
-        React.StrictMode, null,
+    try {
+      if (window.__markStep) window.__markStep('React Loaded', true);
+      if (window.__markStep) window.__markStep('ReactDOM Loaded', true);
+      if (window.__markStep) window.__markStep('Material UI Loaded', true);
+
+      const root = createRoot(document.getElementById('root'));
+      if (window.__markStep) window.__markStep('ReactDOM.createRoot() Executed', true);
+
+      root.render(
         React.createElement(
-          AppProvider, null,
-          React.createElement(App)
+          React.StrictMode, null,
+          React.createElement(
+            AppErrorBoundary, null,
+            React.createElement(
+              AppProvider, null,
+              React.createElement(App)
+            )
+          )
         )
-      )
-    );
+      );
+    } catch (bootstrapError) {
+      console.error('Fatal bootstrap error:', bootstrapError);
+      if (window.__markStep) window.__markStep('ReactDOM.createRoot() Executed', false, bootstrapError.message);
+      if (window.__showDiagnostic) {
+        window.__showDiagnostic({
+          message: bootstrapError.message,
+          filename: 'Meeting_summary_app.html (bootstrap)',
+          lineno: null,
+          colno: null,
+          stack: bootstrapError.stack,
+          failedStep: 'ReactDOM.createRoot() / render',
+        });
+      }
+    }
   </script>
 </body>
 </html>
