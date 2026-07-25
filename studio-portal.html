@@ -211,12 +211,7 @@
   .quote-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;}
 
   /* ---- Quotation Item Card (Product / Features / Dimensions, descending) ---- */
-  .item-card{position:relative;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 40px 16px 40px;margin-bottom:14px;transition:opacity .15s,transform .15s;}
-  .item-card.is-dragging{opacity:0.4;transform:scale(0.98);box-shadow:0 12px 26px rgba(8,40,69,0.18);}
-  .item-drag-handle{position:absolute;top:14px;left:10px;width:22px;height:32px;display:flex;align-items:center;justify-content:center;cursor:grab;color:var(--slate);border-radius:6px;font-size:14px;line-height:1;letter-spacing:1px;user-select:none;touch-action:none;}
-  .item-drag-handle:hover{background:var(--paper-2);color:var(--ink);}
-  .item-drag-handle:active{cursor:grabbing;}
-  .room-items.drag-over-room{background:rgba(169,129,79,0.06);border-radius:10px;}
+  .item-card{position:relative;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 40px 16px 16px;margin-bottom:14px;}
   .item-remove-btn{position:absolute;top:12px;right:12px;font-size:16px;}
   .item-card .box{margin-bottom:12px;}
   .item-box-label{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--brass);margin-bottom:5px;}
@@ -701,7 +696,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent", reportsLoaded: false, reportsData: null };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -804,18 +799,6 @@ async function loadProjects(){
     if(wantedFilter && STAGES.includes(wantedFilter)){
       state.filter = wantedFilter;
       state.section = "live";
-    }
-    // Deep link from the CRM's Quotations section (e.g.
-    // studio-portal.html?openQuote=<projectId>) opens straight into that
-    // project's Quotation Builder instead of landing on the project list.
-    const openQuoteId = params.get("openQuote");
-    if(openQuoteId && state.projects.some(p=>p.id===openQuoteId)){
-      state.screen = "quotation";
-      state.quotationProjectId = openQuoteId;
-      state.quotation = null;
-      render();
-      await loadQuotation(openQuoteId);
-      return;
     }
   }catch(e){ /* no-op if URL parsing isn't available */ }
   render();
@@ -2109,28 +2092,12 @@ function computeQuoteTotals(q){
   return { subtotal, discountAmt, taxable, taxAmt, grandTotal, roundOff, grandTotalRounded, paymentAmounts };
 }
 
-// Given a drop container and the pointer's Y position, returns the
-// existing .item-card the dragged card should land above (or null if it
-// belongs at the end) — the standard "closest midpoint below cursor" reorder pattern.
-function getDragAfterElement(container, y){
-  const cards = [...container.querySelectorAll(".item-card:not(.is-dragging)")];
-  return cards.reduce((closest, card)=>{
-    const box = card.getBoundingClientRect();
-    const offset = y - box.top - box.height/2;
-    if(offset < 0 && offset > closest.offset){
-      return { offset, element: card };
-    }
-    return closest;
-  }, { offset: -Infinity, element: null }).element;
-}
-
 function renderQuoteItemCard(it){
   const isAuto = it.unit === "sqft" && it.dimLength !== "" && it.dimSecondary !== "";
   const qty = getItemQty(it);
   const amt = getItemAmount(it);
   return `
     <div class="item-card" data-item-id="${it.id}">
-      <div class="item-drag-handle" draggable="true" title="Drag to reorder">⠿</div>
       <button type="button" class="quote-remove item-remove-btn qi-remove" title="Remove item">✕</button>
 
       <div class="box">
@@ -2569,58 +2536,6 @@ function attachQuotationHandlers(){
       const card = e.target.closest(".item-card");
       const id = card.dataset.itemId;
       state.quotation.items = state.quotation.items.filter(it=>it.id!==id);
-      render();
-    });
-  });
-
-  // ---------- Drag & drop: reordering line-item cards. Dragging is only
-  // initiated from the ⠿ handle (not the whole card) so text selection and
-  // editing inside the card's own inputs/textareas keeps working normally. ----------
-  let draggedItemId = null;
-  body.addEventListener("dragstart", (e)=>{
-    const handle = e.target.closest(".item-drag-handle");
-    if(!handle){ e.preventDefault(); return; }
-    const card = handle.closest(".item-card");
-    if(!card) return;
-    syncQuoteItemsFromDOM();
-    draggedItemId = card.dataset.itemId;
-    card.classList.add("is-dragging");
-    e.dataTransfer.effectAllowed = "move";
-    try{ e.dataTransfer.setData("text/plain", draggedItemId); }catch(err){}
-  });
-  body.addEventListener("dragend", (e)=>{
-    const card = e.target.closest(".item-card");
-    if(card) card.classList.remove("is-dragging");
-    body.querySelectorAll(".room-items.drag-over-room").forEach(el=>el.classList.remove("drag-over-room"));
-    draggedItemId = null;
-  });
-  body.querySelectorAll(".room-items").forEach(container=>{
-    container.addEventListener("dragover", (e)=>{
-      if(!draggedItemId) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      container.classList.add("drag-over-room");
-    });
-    container.addEventListener("dragleave", (e)=>{
-      if(!container.contains(e.relatedTarget)) container.classList.remove("drag-over-room");
-    });
-    container.addEventListener("drop", (e)=>{
-      e.preventDefault();
-      container.classList.remove("drag-over-room");
-      const id = draggedItemId || (e.dataTransfer && e.dataTransfer.getData("text/plain"));
-      if(!id) return;
-      const item = state.quotation.items.find(it=>it.id===id);
-      if(!item) return;
-      const afterEl = getDragAfterElement(container, e.clientY);
-      const newRoomId = container.dataset.roomId;
-      item.roomId = newRoomId;
-      state.quotation.items = state.quotation.items.filter(it=>it.id!==id);
-      if(afterEl){
-        const idx = state.quotation.items.findIndex(it=>it.id===afterEl.dataset.itemId);
-        if(idx === -1) state.quotation.items.push(item); else state.quotation.items.splice(idx, 0, item);
-      } else {
-        state.quotation.items.push(item);
-      }
       render();
     });
   });
@@ -3241,7 +3156,7 @@ function render(){
 
   const headerBack = document.getElementById("headerBack");
   const headerCrmLink = document.getElementById("headerCrmLink");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "amcRequests" || state.screen === "quotationsOverview"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "amcRequests" || state.screen === "quotationsOverview" || state.screen === "reports"){
     headerBack.style.display = "inline-block";
     if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
@@ -3266,6 +3181,12 @@ function render(){
   if(state.screen === "quotationsOverview"){
     main.innerHTML = renderQuotationsOverview();
     attachQuotationsOverviewHandlers();
+    return;
+  }
+
+  if(state.screen === "reports"){
+    main.innerHTML = renderReports();
+    attachReportsHandlers();
     return;
   }
 
@@ -3302,6 +3223,139 @@ function render(){
   if(state.editing !== null){
     renderModal();
   }
+}
+
+async function loadReportsData(){
+  const withQuotes = state.projects.filter(p=>p.quotationNumber);
+  if(!state.designersLoaded) await loadDesigners();
+
+  const fetched = await Promise.all(withQuotes.map(p=>
+    window.storage.get("quotation:" + p.id, true).catch(()=>null)
+  ));
+  const quotationsByProjectId = {};
+  fetched.forEach((res,i)=>{
+    if(res && res.value){
+      try{ quotationsByProjectId[withQuotes[i].id] = JSON.parse(res.value); }catch(e){ /* skip unreadable record */ }
+    }
+  });
+
+  const totalQuotationValue = withQuotes.reduce((s,p)=> s + (Number(p.quotationGrandTotal)||0), 0);
+  const convertedCount = withQuotes.filter(p=>p.quotationStatus==="converted").length;
+  const conversionRate = withQuotes.length ? (convertedCount / withQuotes.length) * 100 : 0;
+  const revenueForecast = withQuotes.filter(p=>p.quotationStatus==="sent" || p.quotationStatus==="approved").reduce((s,p)=> s + (Number(p.quotationGrandTotal)||0), 0);
+
+  const materialCounts = {};
+  Object.values(quotationsByProjectId).forEach(q=>{
+    (q.items||[]).forEach(it=>{
+      if(!it.brand) return;
+      materialCounts[it.brand] = (materialCounts[it.brand]||0) + 1;
+    });
+  });
+  const topMaterials = Object.entries(materialCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+
+  const designerStats = {};
+  withQuotes.forEach(p=>{
+    const key = p.assignedDesignerId || "unassigned";
+    if(!designerStats[key]) designerStats[key] = { count:0, value:0, converted:0 };
+    designerStats[key].count++;
+    designerStats[key].value += Number(p.quotationGrandTotal)||0;
+    if(p.quotationStatus === "converted") designerStats[key].converted++;
+  });
+  const designerPerformance = Object.entries(designerStats).map(([id, stats])=>{
+    const designer = (state.designers||[]).find(d=>d.id===id);
+    return {
+      name: designer ? designer.name : "Unassigned",
+      count: stats.count, value: stats.value, converted: stats.converted,
+      conversionRate: stats.count ? (stats.converted / stats.count) * 100 : 0
+    };
+  }).sort((a,b)=>b.value-a.value);
+
+  const monthly = {};
+  withQuotes.forEach(p=>{
+    if(!p.quotationUpdatedAt) return;
+    const key = p.quotationUpdatedAt.slice(0,7); // YYYY-MM
+    if(!monthly[key]) monthly[key] = { count:0, value:0 };
+    monthly[key].count++;
+    monthly[key].value += Number(p.quotationGrandTotal)||0;
+  });
+  const monthlyTrends = Object.entries(monthly).sort((a,b)=>a[0]<b[0]?-1:1).slice(-6);
+
+  state.reportsData = { totalQuotationValue, conversionRate, revenueForecast, topMaterials, designerPerformance, monthlyTrends, totalQuotes: withQuotes.length };
+  state.reportsLoaded = true;
+}
+
+function renderReports(){
+  if(!state.reportsLoaded || !state.reportsData){
+    return `<div class="quote-header"><div class="eyebrow mono">Quotation Builder</div><h1>Reports</h1></div><div class="empty">Loading report data…</div>`;
+  }
+  const r = state.reportsData;
+  const maxMonthValue = Math.max(1, ...r.monthlyTrends.map(([,v])=>v.value));
+  const maxMaterialCount = Math.max(1, ...r.topMaterials.map(([,c])=>c));
+
+  return `
+    <div class="quote-header">
+      <div class="eyebrow mono">Quotation Builder</div>
+      <h1>Reports</h1>
+      <div class="sub">Based on ${r.totalQuotes} quotation${r.totalQuotes===1?"":"s"} across all projects</div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:28px;">
+      <div class="card"><div class="fact-label">Total Quotation Value</div><div class="display" style="font-size:22px;margin-top:6px;">${fmtMoney(r.totalQuotationValue)}</div></div>
+      <div class="card"><div class="fact-label">Conversion Rate</div><div class="display" style="font-size:22px;margin-top:6px;">${r.conversionRate.toFixed(1)}%</div></div>
+      <div class="card"><div class="fact-label">Revenue Forecast (Sent + Approved)</div><div class="display" style="font-size:22px;margin-top:6px;">${fmtMoney(r.revenueForecast)}</div></div>
+    </div>
+
+    <div class="section-label">Monthly Trends (Last 6 Months)</div>
+    ${r.monthlyTrends.length ? r.monthlyTrends.map(([month, v])=>`
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <div style="width:70px;font-size:12px;color:var(--slate);flex-shrink:0;">${escapeHtml(month)}</div>
+        <div style="flex:1;background:var(--paper-2);border-radius:4px;overflow:hidden;height:20px;">
+          <div style="width:${(v.value/maxMonthValue*100).toFixed(1)}%;background:var(--brass);height:100%;"></div>
+        </div>
+        <div style="width:140px;font-size:12px;text-align:right;flex-shrink:0;">${fmtMoney(v.value)} · ${v.count} quote${v.count===1?"":"s"}</div>
+      </div>`).join("") : `<div class="empty">No dated quotations yet.</div>`}
+
+    <div class="section-label" style="margin-top:24px;">Most Selected Materials / Brands</div>
+    ${r.topMaterials.length ? r.topMaterials.map(([brand, count])=>`
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <div style="width:160px;font-size:12.5px;flex-shrink:0;">${escapeHtml(brand)}</div>
+        <div style="flex:1;background:var(--paper-2);border-radius:4px;overflow:hidden;height:16px;">
+          <div style="width:${(count/maxMaterialCount*100).toFixed(1)}%;background:var(--sage);height:100%;"></div>
+        </div>
+        <div style="width:70px;font-size:12px;text-align:right;flex-shrink:0;">${count} item${count===1?"":"s"}</div>
+      </div>`).join("") : `<div class="empty">No line items with a Brand/Material set yet.</div>`}
+
+    <div class="section-label" style="margin-top:24px;">Designer Performance</div>
+    ${r.designerPerformance.length ? `
+    <div class="grid">
+      ${r.designerPerformance.map(d=>`
+        <div class="card">
+          <div class="card-title" style="font-size:16px;">${escapeHtml(d.name)}</div>
+          <div class="facts">
+            <div><div class="fact-label">Quotations</div><div class="fact-val">${d.count}</div></div>
+            <div><div class="fact-label">Total Value</div><div class="fact-val">${fmtMoney(d.value)}</div></div>
+            <div><div class="fact-label">Converted</div><div class="fact-val">${d.converted}</div></div>
+            <div><div class="fact-label">Conversion Rate</div><div class="fact-val">${d.conversionRate.toFixed(1)}%</div></div>
+          </div>
+        </div>`).join("")}
+    </div>` : `<div class="empty">No quotations yet.</div>`}
+
+    <div style="margin-top:24px;font-size:12px;color:var(--slate);">Sales Performance and Lead Source reports aren't shown here — the project record doesn't currently capture a sales executive or lead source field. Add those fields to the project form first and this report can be extended to cover them.</div>
+
+    <div class="quote-actions" style="margin-top:20px;">
+      <button type="button" class="btn ghost" id="refreshReportsBtn">↻ Refresh</button>
+    </div>
+  `;
+}
+
+function attachReportsHandlers(){
+  const refreshBtn = document.getElementById("refreshReportsBtn");
+  if(refreshBtn) refreshBtn.onclick = async ()=>{
+    state.reportsLoaded = false;
+    render();
+    await loadReportsData();
+    render();
+  };
 }
 
 function renderQuotationsOverview(){
@@ -3443,6 +3497,8 @@ function renderStudio(){
         ${STAGES.map(s=>`<option value="${s}" ${state.filter===s?"selected":""}>${s}</option>`).join("")}
       </select>` : ""}
       <button class="btn ghost" id="designerProfilesBtn">Designer Profiles</button>
+      <button class="btn ghost" id="quotationsOverviewBtn">Quotations</button>
+      <button class="btn ghost" id="reportsBtn">Reports</button>
       <button class="btn ghost" id="amcRequestsBtn">AMC Requests${(()=>{ const openCount = state.amcRequests.filter(r=>r.status==="Open").length; return openCount ? ` (${openCount})` : ""; })()}</button>
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
@@ -5040,6 +5096,19 @@ function attachStudioHandlers(){
     if(!state.designersLoaded){ await loadDesigners(); render(); }
   };
 
+  const qOverviewBtn = document.getElementById("quotationsOverviewBtn");
+  if(qOverviewBtn) qOverviewBtn.onclick = ()=>{
+    state.screen = "quotationsOverview";
+    render();
+  };
+
+  const reportsBtn = document.getElementById("reportsBtn");
+  if(reportsBtn) reportsBtn.onclick = async ()=>{
+    state.screen = "reports";
+    render();
+    if(!state.reportsLoaded){ await loadReportsData(); render(); }
+  };
+
   const amcBtn = document.getElementById("amcRequestsBtn");
   if(amcBtn) amcBtn.onclick = async ()=>{
     state.screen = "amcRequests";
@@ -5134,6 +5203,11 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
     return;
   }
   if(state.screen === "quotationsOverview"){
+    state.screen = "main";
+    render();
+    return;
+  }
+  if(state.screen === "reports"){
     state.screen = "main";
     render();
     return;
