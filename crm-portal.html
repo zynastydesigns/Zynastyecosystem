@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
 <title>Zynasty CRM — Studio Pipeline</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -353,7 +353,7 @@
      page. Everything else is sized to fit the viewport as closely as
      possible. ---------- */
   @media (max-width:1024px){
-    #dashboard-view{height:100dvh;height:100vh;overflow:hidden;}
+    #dashboard-view{height:100vh;height:100dvh;overflow:hidden;}
     #dashboard-view .app-shell{height:100%;overflow:hidden;}
     #dashboard-view .main{height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;}
     #dashboard-view .topbar{flex-shrink:0;margin-bottom:16px;}
@@ -1739,19 +1739,32 @@
   // ---------- Drag & drop: dragging a card onto another column updates its
   // stage the same way the dropdown does, saves immediately, and re-renders. ----------
   const movingLeadIds = new Set();
-  async function moveLeadToStage(id, newStage){
+  // beforeLeadId, when passed (including null, meaning "at the end"), also
+  // repositions the lead within currentLeads so manual drag order is kept —
+  // the dropdown path omits it entirely, leaving its stage-only behavior unchanged.
+  async function moveLeadToStage(id, newStage, beforeLeadId){
     if(movingLeadIds.has(id)) return; // a move for this lead is already saving — ignore a rapid repeat drag/dropdown change
     const lead = currentLeads.find(l => l.id === id);
-    if(!lead || lead.stage === newStage) return;
+    if(!lead) return;
+    const stageChanged = lead.stage !== newStage;
+    const reordering = beforeLeadId !== undefined;
+    if(!stageChanged && !reordering) return;
     movingLeadIds.add(id);
     try{
       const wasVisible = leadShouldBeVisibleToStudio(lead.stage);
       lead.stage = newStage;
       lead.updatedAt = new Date().toISOString();
-      if(leadShouldBeVisibleToStudio(newStage) && !lead.projectKey){
-        await syncLeadToProjects(lead);
-      }else if(lead.projectKey && (newStage === "Lost" || wasVisible)){
-        await updateSyncedProjectStatus(lead);
+      if(reordering){
+        currentLeads = currentLeads.filter(l => l.id !== id);
+        const idx = beforeLeadId ? currentLeads.findIndex(l => l.id === beforeLeadId) : -1;
+        if(idx === -1) currentLeads.push(lead); else currentLeads.splice(idx, 0, lead);
+      }
+      if(stageChanged){
+        if(leadShouldBeVisibleToStudio(newStage) && !lead.projectKey){
+          await syncLeadToProjects(lead);
+        }else if(lead.projectKey && (newStage === "Lost" || wasVisible)){
+          await updateSyncedProjectStatus(lead);
+        }
       }
       await saveLeads(currentLeads);
       renderLeadsBoard(currentLeads);
@@ -1759,6 +1772,20 @@
     }finally{
       movingLeadIds.delete(id);
     }
+  }
+
+  // Given a column's scroll container and the pointer's Y position, returns
+  // the existing .lead-card the dragged card should land above (or null for "at the end").
+  function getDragAfterElement(container, y){
+    const cards = [...container.querySelectorAll('.lead-card:not(.is-dragging)')];
+    return cards.reduce((closest, card)=>{
+      const box = card.getBoundingClientRect();
+      const offset = y - box.top - box.height/2;
+      if(offset < 0 && offset > closest.offset){
+        return { offset, element: card };
+      }
+      return closest;
+    }, { offset: -Infinity, element: null }).element;
   }
 
   let draggedLeadId = null;
@@ -1795,7 +1822,10 @@
     const id = draggedLeadId || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
     const newStage = column.getAttribute('data-stage');
     if(!id || !newStage) return;
-    await moveLeadToStage(id, newStage);
+    const scrollEl = column.querySelector('.lead-column-scroll');
+    const afterEl = scrollEl ? getDragAfterElement(scrollEl, e.clientY) : null;
+    const beforeLeadId = afterEl ? afterEl.getAttribute('data-lead-id') : null;
+    await moveLeadToStage(id, newStage, beforeLeadId);
   });
 
   leadsBoard.addEventListener('change', async function(e){

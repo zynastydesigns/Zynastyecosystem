@@ -211,7 +211,12 @@
   .quote-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;}
 
   /* ---- Quotation Item Card (Product / Features / Dimensions, descending) ---- */
-  .item-card{position:relative;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 40px 16px 16px;margin-bottom:14px;}
+  .item-card{position:relative;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 40px 16px 40px;margin-bottom:14px;transition:opacity .15s,transform .15s;}
+  .item-card.is-dragging{opacity:0.4;transform:scale(0.98);box-shadow:0 12px 26px rgba(8,40,69,0.18);}
+  .item-drag-handle{position:absolute;top:14px;left:10px;width:22px;height:32px;display:flex;align-items:center;justify-content:center;cursor:grab;color:var(--slate);border-radius:6px;font-size:14px;line-height:1;letter-spacing:1px;user-select:none;touch-action:none;}
+  .item-drag-handle:hover{background:var(--paper-2);color:var(--ink);}
+  .item-drag-handle:active{cursor:grabbing;}
+  .room-items.drag-over-room{background:rgba(169,129,79,0.06);border-radius:10px;}
   .item-remove-btn{position:absolute;top:12px;right:12px;font-size:16px;}
   .item-card .box{margin-bottom:12px;}
   .item-box-label{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--brass);margin-bottom:5px;}
@@ -2092,12 +2097,28 @@ function computeQuoteTotals(q){
   return { subtotal, discountAmt, taxable, taxAmt, grandTotal, roundOff, grandTotalRounded, paymentAmounts };
 }
 
+// Given a drop container and the pointer's Y position, returns the
+// existing .item-card the dragged card should land above (or null if it
+// belongs at the end) — the standard "closest midpoint below cursor" reorder pattern.
+function getDragAfterElement(container, y){
+  const cards = [...container.querySelectorAll(".item-card:not(.is-dragging)")];
+  return cards.reduce((closest, card)=>{
+    const box = card.getBoundingClientRect();
+    const offset = y - box.top - box.height/2;
+    if(offset < 0 && offset > closest.offset){
+      return { offset, element: card };
+    }
+    return closest;
+  }, { offset: -Infinity, element: null }).element;
+}
+
 function renderQuoteItemCard(it){
   const isAuto = it.unit === "sqft" && it.dimLength !== "" && it.dimSecondary !== "";
   const qty = getItemQty(it);
   const amt = getItemAmount(it);
   return `
     <div class="item-card" data-item-id="${it.id}">
+      <div class="item-drag-handle" draggable="true" title="Drag to reorder">⠿</div>
       <button type="button" class="quote-remove item-remove-btn qi-remove" title="Remove item">✕</button>
 
       <div class="box">
@@ -2536,6 +2557,58 @@ function attachQuotationHandlers(){
       const card = e.target.closest(".item-card");
       const id = card.dataset.itemId;
       state.quotation.items = state.quotation.items.filter(it=>it.id!==id);
+      render();
+    });
+  });
+
+  // ---------- Drag & drop: reordering line-item cards. Dragging is only
+  // initiated from the ⠿ handle (not the whole card) so text selection and
+  // editing inside the card's own inputs/textareas keeps working normally. ----------
+  let draggedItemId = null;
+  body.addEventListener("dragstart", (e)=>{
+    const handle = e.target.closest(".item-drag-handle");
+    if(!handle){ e.preventDefault(); return; }
+    const card = handle.closest(".item-card");
+    if(!card) return;
+    syncQuoteItemsFromDOM();
+    draggedItemId = card.dataset.itemId;
+    card.classList.add("is-dragging");
+    e.dataTransfer.effectAllowed = "move";
+    try{ e.dataTransfer.setData("text/plain", draggedItemId); }catch(err){}
+  });
+  body.addEventListener("dragend", (e)=>{
+    const card = e.target.closest(".item-card");
+    if(card) card.classList.remove("is-dragging");
+    body.querySelectorAll(".room-items.drag-over-room").forEach(el=>el.classList.remove("drag-over-room"));
+    draggedItemId = null;
+  });
+  body.querySelectorAll(".room-items").forEach(container=>{
+    container.addEventListener("dragover", (e)=>{
+      if(!draggedItemId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      container.classList.add("drag-over-room");
+    });
+    container.addEventListener("dragleave", (e)=>{
+      if(!container.contains(e.relatedTarget)) container.classList.remove("drag-over-room");
+    });
+    container.addEventListener("drop", (e)=>{
+      e.preventDefault();
+      container.classList.remove("drag-over-room");
+      const id = draggedItemId || (e.dataTransfer && e.dataTransfer.getData("text/plain"));
+      if(!id) return;
+      const item = state.quotation.items.find(it=>it.id===id);
+      if(!item) return;
+      const afterEl = getDragAfterElement(container, e.clientY);
+      const newRoomId = container.dataset.roomId;
+      item.roomId = newRoomId;
+      state.quotation.items = state.quotation.items.filter(it=>it.id!==id);
+      if(afterEl){
+        const idx = state.quotation.items.findIndex(it=>it.id===afterEl.dataset.itemId);
+        if(idx === -1) state.quotation.items.push(item); else state.quotation.items.splice(idx, 0, item);
+      } else {
+        state.quotation.items.push(item);
+      }
       render();
     });
   });
