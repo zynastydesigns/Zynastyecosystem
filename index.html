@@ -573,7 +573,7 @@ function generateProductionAgreementPdf(project){
   doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Production-Stage-Agreement.pdf");
 }
 
-let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcView: "home", amcJustActivated: false, amcFormPreset: null, amcPlanPrice: 0 };
+let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcView: "home", amcJustActivated: false, amcFormPreset: null, amcPlanPrice: 0, productionUpdateImages: {} };
 const AMC_KEY = "amc_requests";
 
 // Remembers which project this browser is currently looking at, so a reload
@@ -758,6 +758,7 @@ async function refreshCurrentProject(){
         const res2 = await window.storage.get("final-quotation-pdf:" + updated.id, true);
         state.clientFinalQuotationPdf = res2 && res2.value ? res2.value : null;
       }catch(e){ /* keep last known PDF on failure */ }
+      await loadProductionUpdateImages(updated);
     } else {
       state.clientResult = null;
     }
@@ -767,6 +768,39 @@ async function refreshCurrentProject(){
 
 function escapeHtml(str){
   return (str||"").toString().replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+const PRODUCTION_UPDATE_COLORS = { "Modular Furniture": "#8C8F5E", "Civil Work": "#A9814F", "Painting": "#74845F" };
+
+async function loadProductionUpdateImages(p){
+  if(!p) return;
+  const allIds = (p.productionUpdates||[]).flatMap(u=>u.images||[]);
+  const missing = [...new Set(allIds)].filter(id=>!state.productionUpdateImages[id]);
+  if(!missing.length) return;
+  const results = await Promise.all(missing.map(id=>window.storage.get("production-update-image:"+id, true).catch(()=>null)));
+  results.forEach((res,i)=>{ if(res && res.value) state.productionUpdateImages[missing[i]] = res.value; });
+}
+
+function renderProductionUpdatesForClient(p){
+  const updates = p.productionUpdates || [];
+  if(!updates.length) return "";
+  const cardsHtml = [...updates].reverse().map(u=>{
+    const color = PRODUCTION_UPDATE_COLORS[u.service] || "var(--brass)";
+    const imagesHtml = (u.images||[]).map(imgId=>{
+      const src = state.productionUpdateImages[imgId];
+      return src ? `<div style="width:100px;height:100px;border-radius:8px;overflow:hidden;flex-shrink:0;"><img src="${src}" style="width:100%;height:100%;object-fit:cover;"></div>` : "";
+    }).join("");
+    return `
+    <div style="padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <span style="display:inline-block;padding:4px 10px;border-radius:20px;background:${color};color:#fff;font-size:11.5px;font-weight:600;letter-spacing:0.3px;">${escapeHtml(u.service)}</span>
+        <span style="font-size:11.5px;color:var(--slate);">${escapeHtml(fmtDate((u.createdAt||"").slice(0,10)))}</span>
+      </div>
+      ${u.note ? `<div style="font-size:13.5px;line-height:1.6;margin-top:10px;">${escapeHtml(u.note)}</div>` : ""}
+      ${imagesHtml ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">${imagesHtml}</div>` : ""}
+    </div>`;
+  }).join("");
+  return `<div class="portal-box" style="margin-top:14px;"><h3>Production Updates</h3><div style="margin-top:10px;">${cardsHtml}</div></div>`;
 }
 function escapeAttr(str){ return escapeHtml(str); }
 
@@ -1687,7 +1721,8 @@ function renderClient(){
           <div class="big">${fmtDate(p.contractSignedDate)}</div>
         </div>
       </div>
-      ${p.contractNotes ? `<div class="portal-box" style="margin-top:14px;"><h3>Contract Notes</h3><div style="font-size:14px;line-height:1.6;">${escapeHtml(p.contractNotes)}</div></div>` : ""}`;
+      ${p.contractNotes ? `<div class="portal-box" style="margin-top:14px;"><h3>Contract Notes</h3><div style="font-size:14px;line-height:1.6;">${escapeHtml(p.contractNotes)}</div></div>` : ""}
+      ${renderProductionUpdatesForClient(p)}`;
 
     return `
       <button class="back-link" id="backBtn">← Look up another project</button>
@@ -1751,6 +1786,7 @@ async function lookupProjectByCode(code){
     }catch(e){
       state.clientFinalQuotationPdf = null;
     }
+    await loadProductionUpdateImages(match);
     render();
     return true;
   } else {
@@ -1951,7 +1987,7 @@ function attachClientHandlers(){
       p.designAgreementSignedDate = p.agreementAcceptedAt.slice(0,10);
       wizardAgree.disabled = true;
       wizardAgree.textContent = "Saving…";
-      const ok = await updateClientProject(p.accessCode, {
+      const ok = await saveClientProject(p, {
         agreementAccepted: p.agreementAccepted,
         agreementAcceptedAt: p.agreementAcceptedAt,
         designAgreementSignedDate: p.designAgreementSignedDate
@@ -1990,7 +2026,7 @@ function attachClientHandlers(){
       p.quotationAcceptedAt = new Date().toISOString();
       acceptQuote.disabled = true;
       acceptQuote.textContent = "Saving…";
-      const ok = await updateClientProject(p.accessCode, {
+      const ok = await saveClientProject(p, {
         quotationAccepted: p.quotationAccepted,
         quotationAcceptedAt: p.quotationAcceptedAt
       });
@@ -2012,7 +2048,7 @@ function attachClientHandlers(){
       p.productionAgreementAcceptedAt = new Date().toISOString();
       productionAgreeBtn.disabled = true;
       productionAgreeBtn.textContent = "Saving…";
-      const ok = await updateClientProject(p.accessCode, {
+      const ok = await saveClientProject(p, {
         productionAgreementAccepted: p.productionAgreementAccepted,
         productionAgreementAcceptedAt: p.productionAgreementAcceptedAt
       });
@@ -2039,7 +2075,7 @@ function attachClientHandlers(){
       p.finalQuotationAcceptedAt = new Date().toISOString();
       acceptFinalQuote.disabled = true;
       acceptFinalQuote.textContent = "Saving…";
-      const ok = await updateClientProject(p.accessCode, {
+      const ok = await saveClientProject(p, {
         finalQuotationAccepted: p.finalQuotationAccepted,
         finalQuotationAcceptedAt: p.finalQuotationAcceptedAt
       });
@@ -2172,7 +2208,7 @@ function attachClientHandlers(){
         p.productionPaymentReferenceNote = referenceNote;
         p.productionPaymentSubmittedAt = new Date().toISOString();
         p.productionPaymentRejectionNote = "";
-        const projectsSaved = await updateClientProject(p.accessCode, {
+        const projectsSaved = await saveClientProject(p, {
           productionPaymentStatus: p.productionPaymentStatus,
           productionPaymentReferenceNote: p.productionPaymentReferenceNote,
           productionPaymentSubmittedAt: p.productionPaymentSubmittedAt,
@@ -2196,7 +2232,7 @@ function attachClientHandlers(){
       p.status = "Onboarding";
       letsBook.disabled = true;
       letsBook.textContent = "Booking…";
-      const ok = await updateClientProject(p.accessCode, { status: p.status });
+      const ok = await saveClientProject(p, { status: p.status });
       if(!ok) console.error("Could not move project to Onboarding");
       state.onboardingStep = null;
       render();
@@ -2306,7 +2342,7 @@ function attachClientHandlers(){
         p.paymentReferenceNote = referenceNote;
         p.paymentSubmittedAt = new Date().toISOString();
         p.paymentRejectionNote = "";
-        const projectsSaved = await updateClientProject(p.accessCode, {
+        const projectsSaved = await saveClientProject(p, {
           paymentStatus: p.paymentStatus,
           paymentReferenceNote: p.paymentReferenceNote,
           paymentSubmittedAt: p.paymentSubmittedAt,
@@ -2388,7 +2424,7 @@ function attachClientHandlers(){
         p.kycAddress = (addressInput && addressInput.value.trim()) || "";
         p.kycCompleted = true;
         p.kycSubmittedAt = new Date().toISOString();
-        const projectsSaved = await updateClientProject(p.accessCode, {
+        const projectsSaved = await saveClientProject(p, {
           kycFullName: p.kycFullName,
           kycEmail: p.kycEmail,
           kycAadhaarNumber: p.kycAadhaarNumber,
@@ -2414,7 +2450,7 @@ function attachClientHandlers(){
       p.status = "Design Development";
       continueToDesign.disabled = true;
       continueToDesign.textContent = "Moving forward…";
-      const ok = await updateClientProject(p.accessCode, { status: p.status });
+      const ok = await saveClientProject(p, { status: p.status });
       if(!ok) console.error("Could not move project to Design Development");
       state.onboardingStep = null;
       render();
@@ -2427,7 +2463,7 @@ function attachClientHandlers(){
       p.designWelcomeSeen = true;
       state.designStep = "designer";
       render();
-      const ok = await updateClientProject(p.accessCode, { designWelcomeSeen: p.designWelcomeSeen });
+      const ok = await saveClientProject(p, { designWelcomeSeen: p.designWelcomeSeen });
       if(!ok) console.error("Could not save design welcome progress");
     };
   }
@@ -2439,7 +2475,7 @@ function attachClientHandlers(){
       p.designerIntroSeen = true;
       state.designStep = "progress";
       render();
-      const ok = await updateClientProject(p.accessCode, { designerIntroSeen: p.designerIntroSeen });
+      const ok = await saveClientProject(p, { designerIntroSeen: p.designerIntroSeen });
       if(!ok) console.error("Could not save designer intro progress");
     };
   }
@@ -2633,7 +2669,7 @@ function attachClientHandlers(){
       p.status = "In Discussion";
       p.reconsideredAt = new Date().toISOString();
       p.lostAt = "";
-      const ok = await updateClientProject(p.accessCode, {
+      const ok = await saveClientProject(p, {
         reconsiderRequestNotes: p.reconsiderRequestNotes,
         reconsiderRequestedAt: p.reconsiderRequestedAt,
         status: p.status,
@@ -2664,7 +2700,7 @@ function attachClientHandlers(){
       try{
         if(!p.referrals) p.referrals = [];
         p.referrals.push({ id: "r_" + Date.now() + "_" + Math.floor(Math.random()*10000), name, contact, notes, submittedAt: new Date().toISOString() });
-        const ok = await updateClientProject(p.accessCode, { referrals: p.referrals });
+        const ok = await saveClientProject(p, { referrals: p.referrals });
         if(!ok) throw new Error("Save failed");
         render();
       }catch(e){
@@ -2692,6 +2728,18 @@ function isRefreshUnsafe(){
     return formShowing;
   }
   if(step === "kyc") return !p.kycCompleted;
+  // Production phase: same reasoning as the onboarding agreement/payment
+  // guards above — don't let a background poll re-derive productionStep
+  // from server truth (which is still "not yet accepted") while the
+  // client is mid-way through reading the agreement/final quotation or
+  // filling in payment, or it snaps them back to an earlier step.
+  const prodStep = state.productionStep;
+  if(prodStep === "agreement" && !p.productionAgreementAccepted) return true;
+  if(prodStep === "quotation" && !p.finalQuotationAccepted) return true;
+  if(prodStep === "payment"){
+    const formShowing = p.productionPaymentStatus !== "submitted" && p.productionPaymentStatus !== "verified";
+    return formShowing;
+  }
   // AMC section: don't refresh out from under someone mid-way through
   // writing a comment or filling the support request form.
   if(state.clientView === "amc"){
@@ -2768,7 +2816,7 @@ async function handleCashfreeReturn(){
         p.productionPaymentStatus = "verified";
         p.productionPaymentVerifiedAt = new Date().toISOString();
         p.productionPaymentReferenceNote = orderId;
-        await updateClientProject(p.accessCode, {
+        await saveClientProject(p, {
           productionPaymentStatus: p.productionPaymentStatus,
           productionPaymentVerifiedAt: p.productionPaymentVerifiedAt,
           productionPaymentReferenceNote: p.productionPaymentReferenceNote
@@ -2781,7 +2829,7 @@ async function handleCashfreeReturn(){
         p.amcPaymentId = orderId;
         p.amcPaymentDate = activatedAt.toISOString();
         p.amcExpiryDate = expiry.toISOString();
-        await updateClientProject(p.accessCode, {
+        await saveClientProject(p, {
           amcActive: p.amcActive,
           amcPaymentId: p.amcPaymentId,
           amcPaymentDate: p.amcPaymentDate,
@@ -2792,7 +2840,7 @@ async function handleCashfreeReturn(){
         p.paymentStatus = "verified";
         p.paymentVerifiedAt = new Date().toISOString();
         p.paymentReferenceNote = orderId;
-        await updateClientProject(p.accessCode, {
+        await saveClientProject(p, {
           paymentStatus: p.paymentStatus,
           paymentVerifiedAt: p.paymentVerifiedAt,
           paymentReferenceNote: p.paymentReferenceNote

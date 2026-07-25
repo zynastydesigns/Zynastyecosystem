@@ -696,7 +696,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent", reportsLoaded: false, reportsData: null };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent", reportsLoaded: false, reportsData: null };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -812,7 +812,7 @@ async function saveProjects(excludeIds){
   // the same protection from the merge below, or they'd be silently
   // overwritten by a stale fetch (this was the root cause of Design Studio
   // uploads/edits not sticking).
-  const protectedIds = new Set([state.editing, state.designStudioProjectId, state.quotationProjectId].filter(Boolean));
+  const protectedIds = new Set([state.editing, state.designStudioProjectId, state.quotationProjectId, state.productionUpdatesProjectId].filter(Boolean));
   try{
     // Before overwriting the whole shared "projects" blob, pull the latest
     // copy and merge it in for every project OTHER than the one(s) currently
@@ -1151,9 +1151,13 @@ function drawPdfTable(doc, opts){
   const colX = [];
   let acc = x;
   colWidths.forEach(w=>{ colX.push(acc); acc += w; });
+  const IMG_BOX = 44; // thumbnail box size (pt), image column only
 
   function cellLines(cell, colWidth){
     doc.setFontSize(fontSize);
+    if(cell && typeof cell === "object" && cell.image !== undefined){
+      return { mainLines: [], tagLines: [] };
+    }
     if(cell && typeof cell === "object"){
       const mainLines = doc.splitTextToSize(String(cell.main||"—"), colWidth - cellPad*2);
       const tagLines = cell.tag ? doc.splitTextToSize(String(cell.tag), colWidth - cellPad*2) : [];
@@ -1164,11 +1168,15 @@ function drawPdfTable(doc, opts){
 
   function rowHeight(cells){
     let maxLines = 1;
+    let hasImage = false;
     cells.forEach((cell,i)=>{
+      if(cell && typeof cell === "object" && cell.image !== undefined){ if(cell.image) hasImage = true; return; }
       const { mainLines, tagLines } = cellLines(cell, colWidths[i]);
       maxLines = Math.max(maxLines, mainLines.length + tagLines.length);
     });
-    return maxLines * lineH + cellPad*2;
+    const textH = maxLines * lineH + cellPad*2;
+    const imgH = hasImage ? IMG_BOX + cellPad*2 : 0;
+    return Math.max(textH, imgH);
   }
 
   function drawHeader(y){
@@ -1212,6 +1220,17 @@ function drawPdfTable(doc, opts){
       doc.rect(x, y, width, h, "F");
     }
     row.forEach((cell,i)=>{
+      if(cell && typeof cell === "object" && cell.image !== undefined){
+        if(cell.image){
+          const dims = cell.dims || { w: 1, h: 1 };
+          const scale = Math.min(IMG_BOX / dims.w, IMG_BOX / dims.h);
+          const iw = Math.max(1, dims.w * scale), ih = Math.max(1, dims.h * scale);
+          const ix = colX[i] + (colWidths[i] - iw) / 2;
+          const iy = y + (h - ih) / 2;
+          try{ doc.addImage(cell.image, "JPEG", ix, iy, iw, ih, undefined, "FAST"); }catch(e){ console.warn("Item image could not be embedded:", e); }
+        }
+        return;
+      }
       const { mainLines, tagLines } = cellLines(cell, colWidths[i]);
       const align = columns[i].align || "left";
       const tx = align === "right" ? colX[i] + colWidths[i] - cellPad : colX[i] + cellPad;
@@ -1358,14 +1377,25 @@ async function generateQuotationPdf(project, quotation){
   y = infoBoxTop + infoBoxH + 22;
 
   const columns = [
-    { label: "Item", frac: 0.17, align: "left" },
-    { label: "Specification", frac: 0.35, align: "left" },
+    { label: "Item", frac: 0.14, align: "left" },
+    { label: "Specification", frac: 0.28, align: "left" },
+    { label: "Photo", frac: 0.10, align: "left" },
     { label: "Qty", frac: 0.09, align: "right" },
     { label: "Unit", frac: 0.08, align: "left" },
     { label: "Rate", frac: 0.14, align: "right" },
     { label: "Amount", frac: 0.17, align: "right" }
   ];
   const tableWidth = pageWidth - margin*2;
+
+  // Preload the natural aspect ratio of every referenced item image once,
+  // up front, so the PDF table (drawn synchronously) can contain-fit each
+  // thumbnail correctly instead of stretching it.
+  const usedImageIds = [...new Set((quotation.items||[]).map(it=>it.imageId).filter(Boolean))];
+  const imageDims = {};
+  await Promise.all(usedImageIds.map(async id=>{
+    const src = state.quoteItemImages[id];
+    if(src) imageDims[id] = await getImageDataUrlDimensions(src);
+  }));
 
   const rooms = (quotation.rooms || []).filter(room => quotation.items.some(it=>it.roomId===room.id));
   rooms.forEach(room=>{
@@ -1387,9 +1417,11 @@ async function generateQuotationPdf(project, quotation){
       const tagParts = [buildHingeFinishTag(it)];
       if(it.brand) tagParts.unshift("Brand: " + it.brand);
       if(Number(it.itemDiscountPercent) > 0) tagParts.push("Item Discount: " + it.itemDiscountPercent + "%");
+      const imageSrc = it.imageId ? state.quoteItemImages[it.imageId] : null;
       return [
         it.productName || "—",
         { main: it.features || "—", tag: tagParts.filter(Boolean).join("   ·   ") },
+        { image: imageSrc, dims: it.imageId ? imageDims[it.imageId] : null },
         String(qty), it.unit, fmtMoneyPdf(it.rate), fmtMoneyPdf(amt)
       ];
     });
@@ -1918,6 +1950,188 @@ function attachDesignStudioHandlers(){
       genBtn.disabled = false;
       genBtn.textContent = "Generate & Save PDF";
     }
+  };
+}
+
+// ---------------------------------------------------------------------
+// Production Updates: a lightweight, dedicated screen (like Quotation
+// Builder / Design Studio) for posting progress updates during the
+// Production stage — Modular Furniture, Civil Work, and Painting — each
+// with a shared photo-upload component. Kept as its own screen rather
+// than more fields in the already-crowded project edit sheet; only a
+// single "Open Production Updates →" link lives there.
+// ---------------------------------------------------------------------
+const PRODUCTION_UPDATE_SERVICES = ["Modular Furniture", "Civil Work", "Painting"];
+const PRODUCTION_UPDATE_COLORS = { "Modular Furniture": "#8C8F5E", "Civil Work": "#A9814F", "Painting": "#74845F" };
+
+function ensureProductionUpdates(p){
+  if(!Array.isArray(p.productionUpdates)) p.productionUpdates = [];
+  return p.productionUpdates;
+}
+function newProductionUpdateId(){ return "pu_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
+function newProductionImageId(){ return "puimg_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
+
+async function loadProductionUpdateImages(p){
+  if(!p) return;
+  const updates = ensureProductionUpdates(p);
+  const allIds = updates.flatMap(u=>u.images||[]);
+  const missing = [...new Set(allIds)].filter(id=>!state.productionUpdateImages[id]);
+  if(!missing.length) return;
+  const results = await Promise.all(missing.map(id=>window.storage.get("production-update-image:"+id, true).catch(()=>null)));
+  results.forEach((res,i)=>{ if(res && res.value) state.productionUpdateImages[missing[i]] = res.value; });
+}
+
+function renderProductionUpdates(){
+  const p = state.projects.find(x=>x.id===state.productionUpdatesProjectId);
+  if(!p) return `<div class="empty">Project not found.</div>`;
+  const updates = ensureProductionUpdates(p);
+
+  const cardsHtml = [...updates].reverse().map(u=>{
+    const color = PRODUCTION_UPDATE_COLORS[u.service] || "var(--brass)";
+    const imagesHtml = (u.images||[]).map(imgId=>{
+      const src = state.productionUpdateImages[imgId];
+      return `<div class="ds-thumb">
+        ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--slate);">Loading…</div>`}
+        <button type="button" class="ds-thumb-remove pu-image-remove" data-update="${u.id}" data-img="${imgId}" title="Remove image">✕</button>
+      </div>`;
+    }).join("");
+    return `
+    <div class="card" style="cursor:default;" data-update-id="${u.id}">
+      <div class="card-top">
+        <span style="display:inline-block;padding:4px 10px;border-radius:20px;background:${color};color:#fff;font-size:11.5px;font-weight:600;letter-spacing:0.3px;">${escapeHtml(u.service)}</span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--slate);">${escapeHtml(fmtDate((u.createdAt||"").slice(0,10)))}</span>
+          <button type="button" class="icon-btn pu-delete-update" data-update="${u.id}">🗑</button>
+        </div>
+      </div>
+      <textarea class="pu-note" data-update="${u.id}" placeholder="What's happening with ${escapeAttr(u.service).toLowerCase()} right now? (shown to the client)" style="width:100%;min-height:60px;margin-top:10px;">${escapeHtml(u.note)}</textarea>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px;">
+        ${imagesHtml}
+        <label class="ds-thumb-add" data-update="${u.id}">
+          + Add Photo
+          <input type="file" accept="image/*" multiple class="pu-file-input" data-update="${u.id}" style="display:none;">
+        </label>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `
+  <div class="display" style="font-size:22px;margin-bottom:4px;">Production Updates</div>
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--slate);margin-bottom:18px;">${escapeHtml(p.projectName)} · ${escapeHtml(formatClientName(p))}</div>
+  <div class="toolbar" style="position:relative;">
+    <div style="flex:1;font-size:12.5px;color:var(--slate);align-self:center;">Post progress photos and notes the client will see in their portal during Production.</div>
+    <button type="button" class="btn ghost" id="puSaveBtn">Save Updates</button>
+    <button type="button" class="btn" id="puAddServiceBtn">+ Add Service</button>
+    ${state.showAddServicePicker ? `
+    <div style="position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.12);padding:6px;z-index:5;display:flex;flex-direction:column;min-width:180px;">
+      ${PRODUCTION_UPDATE_SERVICES.map(s=>`<button type="button" class="pu-service-option" data-service="${escapeAttr(s)}" style="text-align:left;padding:9px 12px;border:none;background:none;font-size:13.5px;border-radius:6px;cursor:pointer;">${escapeHtml(s)}</button>`).join("")}
+    </div>` : ""}
+  </div>
+  ${updates.length ? `<div class="grid">${cardsHtml}</div>` : `
+  <div class="empty">
+    <div class="display">No updates yet</div>
+    <div>Tap "+ Add Service" to post the first update for this project.</div>
+  </div>`}
+  `;
+}
+
+function attachProductionUpdatesHandlers(){
+  const p = state.projects.find(x=>x.id===state.productionUpdatesProjectId);
+  if(!p) return;
+  const updates = ensureProductionUpdates(p);
+
+  const addServiceBtn = document.getElementById("puAddServiceBtn");
+  if(addServiceBtn) addServiceBtn.onclick = ()=>{
+    state.showAddServicePicker = !state.showAddServicePicker;
+    render();
+  };
+
+  document.querySelectorAll(".pu-service-option").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      updates.push({ id: newProductionUpdateId(), service: b.dataset.service, note: "", images: [], createdAt: new Date().toISOString() });
+      state.showAddServicePicker = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll(".pu-note").forEach(ta=>{
+    ta.addEventListener("change", async ()=>{
+      const u = updates.find(x=>x.id===ta.dataset.update);
+      if(!u) return;
+      u.note = ta.value;
+      const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+    });
+  });
+
+  document.querySelectorAll(".pu-delete-update").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      const u = updates.find(x=>x.id===b.dataset.update);
+      if(!u) return;
+      if(!confirm(`Delete this ${u.service} update and its photos? This cannot be undone.`)) return;
+      const imageIds = u.images || [];
+      p.productionUpdates = updates.filter(x=>x.id!==b.dataset.update);
+      logActivity(p, "file", `Deleted a ${u.service} production update`);
+      render();
+      const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+      await Promise.all(imageIds.map(id=>window.storage.delete("production-update-image:"+id, true).catch(()=>{})));
+    });
+  });
+
+  document.querySelectorAll(".pu-file-input").forEach(inp=>{
+    inp.addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      if(!files.length) return;
+      const u = updates.find(x=>x.id===inp.dataset.update);
+      if(!u) return;
+      showToast(`Uploading ${files.length} image${files.length>1?"s":""}…`);
+      let uploaded = 0;
+      for(const file of files){
+        try{
+          const dataUrl = await compressImageFile(file);
+          const imgId = newProductionImageId();
+          const result = await window.storage.set("production-update-image:"+imgId, dataUrl, true);
+          if(!result){ showToast("Could not upload an image. Please try again.", true); continue; }
+          state.productionUpdateImages[imgId] = dataUrl;
+          u.images.push(imgId);
+          uploaded++;
+        }catch(err){
+          console.error(err);
+          showToast("Could not upload an image. Please try again.", true);
+        }
+      }
+      if(uploaded > 0){
+        logActivity(p, "file", `Uploaded ${uploaded} photo${uploaded>1?"s":""} to a ${u.service} update`);
+      }
+      render();
+      const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+    });
+  });
+
+  document.querySelectorAll(".pu-image-remove").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      const u = updates.find(x=>x.id===b.dataset.update);
+      if(!u) return;
+      u.images = u.images.filter(id=>id!==b.dataset.img);
+      logActivity(p, "file", `Removed a photo from a ${u.service} update`);
+      render();
+      const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+      try{ await window.storage.delete("production-update-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
+    });
+  });
+
+  const saveBtn = document.getElementById("puSaveBtn");
+  if(saveBtn) saveBtn.onclick = async ()=>{
+    saveBtn.disabled = true;
+    const original = saveBtn.textContent;
+    saveBtn.textContent = "Saving…";
+    const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates });
+    showToast(ok ? "Production updates saved. The client can see them now." : "Could not save. Please try again.", !ok);
+    saveBtn.disabled = false;
+    saveBtn.textContent = original;
   };
 }
 
@@ -3156,7 +3370,7 @@ function render(){
 
   const headerBack = document.getElementById("headerBack");
   const headerCrmLink = document.getElementById("headerCrmLink");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "amcRequests" || state.screen === "quotationsOverview" || state.screen === "reports"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "productionUpdates" || state.screen === "amcRequests" || state.screen === "quotationsOverview" || state.screen === "reports"){
     headerBack.style.display = "inline-block";
     if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
@@ -3214,6 +3428,12 @@ function render(){
     main.innerHTML = renderDesignStudio();
     attachDesignStudioHandlers();
     renderDsRoomPicker();
+    return;
+  }
+
+  if(state.screen === "productionUpdates"){
+    main.innerHTML = renderProductionUpdates();
+    attachProductionUpdatesHandlers();
     return;
   }
 
@@ -4689,7 +4909,11 @@ function renderModal(){
         </div>
         <div class="field-row">
           <div class="field full"><label>Production Agreement Notes</label><textarea name="contractNotes" placeholder="Terms, deposit, payment schedule…">${escapeHtml(p.contractNotes)}</textarea></div>
-        </div>` : ""}
+        </div>
+
+        <div class="section-label" style="margin-top:22px;">Production Updates</div>
+        <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Post progress photos and notes (Modular Furniture, Civil Work, Painting) for the client to see during Production.</div>
+        <button type="button" class="btn ghost" id="openProductionUpdatesBtn" data-id="${p.id}">Open Production Updates →</button>` : ""}
 
         ${!isNew ? `
         <div class="section-label">Client Progress</div>
@@ -4811,6 +5035,22 @@ function renderModal(){
       render();
       const p = state.projects.find(x=>x.id===projectId);
       await loadDesignStudioImages(p);
+      render();
+    };
+  }
+  const openProductionUpdatesBtn = document.getElementById("openProductionUpdatesBtn");
+  if(openProductionUpdatesBtn){
+    openProductionUpdatesBtn.onclick = async ()=>{
+      const projectId = openProductionUpdatesBtn.dataset.id;
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      popEditHistoryIfNeeded();
+      state.screen = "productionUpdates";
+      state.productionUpdatesProjectId = projectId;
+      state.showAddServicePicker = false;
+      render();
+      const p = state.projects.find(x=>x.id===projectId);
+      await loadProductionUpdateImages(p);
       render();
     };
   }
@@ -5184,6 +5424,13 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
   if(state.screen === "designStudio"){
     state.screen = "main";
     state.designStudioProjectId = null;
+    render();
+    return;
+  }
+  if(state.screen === "productionUpdates"){
+    state.screen = "main";
+    state.productionUpdatesProjectId = null;
+    state.showAddServicePicker = false;
     render();
     return;
   }
