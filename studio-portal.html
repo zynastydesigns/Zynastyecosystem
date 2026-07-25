@@ -805,6 +805,18 @@ async function loadProjects(){
       state.filter = wantedFilter;
       state.section = "live";
     }
+    // Deep link from the CRM's Quotations section (e.g.
+    // studio-portal.html?openQuote=<projectId>) opens straight into that
+    // project's Quotation Builder instead of landing on the project list.
+    const openQuoteId = params.get("openQuote");
+    if(openQuoteId && state.projects.some(p=>p.id===openQuoteId)){
+      state.screen = "quotation";
+      state.quotationProjectId = openQuoteId;
+      state.quotation = null;
+      render();
+      await loadQuotation(openQuoteId);
+      return;
+    }
   }catch(e){ /* no-op if URL parsing isn't available */ }
   render();
 }
@@ -3431,7 +3443,6 @@ function renderStudio(){
         ${STAGES.map(s=>`<option value="${s}" ${state.filter===s?"selected":""}>${s}</option>`).join("")}
       </select>` : ""}
       <button class="btn ghost" id="designerProfilesBtn">Designer Profiles</button>
-      <button class="btn ghost" id="quotationsOverviewBtn">Quotations</button>
       <button class="btn ghost" id="amcRequestsBtn">AMC Requests${(()=>{ const openCount = state.amcRequests.filter(r=>r.status==="Open").length; return openCount ? ` (${openCount})` : ""; })()}</button>
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
@@ -5027,12 +5038,6 @@ function attachStudioHandlers(){
     state.screen = "designers";
     render();
     if(!state.designersLoaded){ await loadDesigners(); render(); }
-  };
-
-  const qOverviewBtn = document.getElementById("quotationsOverviewBtn");
-  if(qOverviewBtn) qOverviewBtn.onclick = ()=>{
-    state.screen = "quotationsOverview";
-    render();
   };
 
   const amcBtn = document.getElementById("amcRequestsBtn");
