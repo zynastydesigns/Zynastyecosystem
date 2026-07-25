@@ -1620,6 +1620,7 @@
         supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1ZW1kZXhjaWl0eHJtdGJpY2FlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4NzQ3NDcsImV4cCI6MjA5OTQ1MDc0N30.NNePZH__2lN9vx5RtnLFvL8rWMn6ifP2HiPfe6Kh2eE',
         storageBucket: 'zynasty.storage',
         developerMode: true,
+        inviteCode: 'ZYNASTY2026',
       },
     };
 
@@ -1634,25 +1635,37 @@
       const [authChecked, setAuthChecked] = useState(false);
       const [authLoading, setAuthLoading] = useState(false);
       const [authError, setAuthError] = useState(null);
-      const [passwordRecovery, setPasswordRecovery] = useState(false);
       const storageRef = useRef(null);
       const geminiServiceRef = useRef(null);
       const authInFlightRef = useRef(false);
+      const tokenRefreshTimerRef = useRef(null);
 
       const authRequired = !!(state.settings.supabaseUrl && state.settings.supabaseAnonKey);
 
-      // Map raw Supabase/GoTrue errors to friendly, specific messages.
-      // Falls back to the raw message for anything unrecognized so real
-      // errors are never silently swallowed.
+      // Map raw Supabase/GoTrue REST error bodies to friendly, specific
+      // messages. Falls back to the raw message for anything unrecognized
+      // so real errors are never silently swallowed.
       const mapAuthError = (e) => {
         const raw = (e && e.message) || String(e || '');
         const msg = raw.toLowerCase();
-        if (msg.includes('invalid login credentials')) return 'Incorrect email or password. Please try again.';
-        if (msg.includes('email not confirmed')) return '__EMAIL_NOT_CONFIRMED__';
-        if (msg.includes('user already registered') || msg.includes('already registered')) return '__ALREADY_REGISTERED__';
+        if (msg.includes('invalid login credentials') || msg.includes('invalid_grant')) return 'Incorrect email or password. Please try again.';
+        if (msg.includes('email not confirmed')) return 'Please confirm your email before signing in.';
+        if (msg.includes('user already registered') || msg.includes('already registered')) return 'An account already exists for this email. Try signing in instead.';
         if (msg.includes('rate limit') || msg.includes('429')) return 'Too many attempts. Please wait a minute and try again.';
         if (msg.includes('password should be at least') || msg.includes('password is too short')) return raw;
-        if (msg.includes('failed to fetch') || msg.includes('network')) return 'Network error - check your connection and the Supabase URL in Settings.';
+        if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network')) {
+          // The single most common cause of a bare "Failed to fetch" here is
+          // opening this HTML file directly from disk (file://...). Browsers
+          // send `Origin: null` for file:// pages, and Supabase's auth API
+          // won't return CORS headers for that origin - so the request is
+          // blocked before it ever reaches the server, and every fetch call
+          // (sign in, sign up, refresh) fails identically. Give that specific,
+          // actionable diagnosis when it's true, instead of a generic message.
+          if (window.location.protocol === 'file:') {
+            return "This page is open directly from a file (file://...), so the browser blocks it from calling Supabase (CORS rejects the 'null' origin). Serve this file over http/https instead - e.g. run `python3 -m http.server` in its folder and open http://localhost:8000, or host it on Netlify/Vercel/GitHub Pages - then reload and sign in again.";
+          }
+          return "Couldn't reach the sign-in service. Check your connection and the Supabase URL in Settings.";
+        }
         if (msg.includes('invalid api key') || msg.includes('invalid_api_key')) return 'Invalid Supabase configuration (anon key). Check Settings.';
         return raw || 'Something went wrong. Please try again.';
       };
@@ -1679,7 +1692,85 @@
         return () => { isMounted = false; };
       }, []);
 
-      // --- Auth session bootstrap + live updates ---
+      // ============================================================
+      //  AUTH - ported from the Zynasty CRM portal's authentication
+      //  system: plain REST calls to Supabase's GoTrue auth endpoints
+      //  (no supabase-js SDK auth calls), an invite-code-gated signup,
+      //  a "Remember me" checkbox that decides sessionStorage (tab-
+      //  scoped, cleared on browser close) vs localStorage (persists),
+      //  and a background token-refresh timer instead of the SDK's
+      //  automatic refresh. Password reset is admin-mediated in this
+      //  system (no self-service reset email) - see the Login screen's
+      //  "Forgot password?" hint.
+      //
+      //  The `session` object this produces - { access_token,
+      //  refresh_token, user: { id, email, ... } } - matches the shape
+      //  the rest of the app (StorageAdapter, Layout's avatar, etc.)
+      //  already expects from supabase-js, so nothing downstream of
+      //  `session` needed to change.
+      // ============================================================
+      const SESSION_KEY = 'aiMeetingSession';
+      // Shared code staff use to self-register. Visible in page source
+      // by design - it only screens out random visitors, not a real
+      // secret. Can be changed in Settings (Developer Mode).
+      const INVITE_CODE = state.settings.inviteCode || 'ZYNASTY2026';
+
+      const sessionStore = () => {
+        try { if (localStorage.getItem(SESSION_KEY)) return localStorage; } catch (e) {}
+        return sessionStorage;
+      };
+      const saveSession = (sessionData, remember) => {
+        const store = remember ? localStorage : sessionStorage;
+        const other = remember ? sessionStorage : localStorage;
+        try { other.removeItem(SESSION_KEY); } catch (e) {}
+        try { store.setItem(SESSION_KEY, JSON.stringify(sessionData)); } catch (e) { authLog('saveSession failed', e && e.message); }
+      };
+      const clearStoredSession = () => {
+        try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+        try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+      };
+      const loadStoredSession = () => {
+        try {
+          const raw = sessionStore().getItem(SESSION_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
+      };
+
+      const refreshStoredSession = async (current) => {
+        if (!current || !current.refresh_token) return null;
+        try {
+          const res = await fetch(`${state.settings.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+            method: 'POST',
+            headers: { apikey: state.settings.supabaseAnonKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: current.refresh_token }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.access_token) throw new Error((data && (data.error_description || data.msg)) || 'HTTP ' + res.status);
+          const updated = { access_token: data.access_token, refresh_token: data.refresh_token || current.refresh_token, user: data.user || current.user };
+          const wasRemembered = (() => { try { return !!localStorage.getItem(SESSION_KEY); } catch (e) { return false; } })();
+          saveSession(updated, wasRemembered);
+          authLog('token refreshed', { userId: updated.user && updated.user.id });
+          return updated;
+        } catch (e) {
+          authLog('token refresh failed', e && e.message);
+          return null;
+        }
+      };
+
+      const stopTokenRefresh = () => {
+        if (tokenRefreshTimerRef.current) { clearInterval(tokenRefreshTimerRef.current); tokenRefreshTimerRef.current = null; }
+      };
+      const startTokenRefresh = () => {
+        stopTokenRefresh();
+        tokenRefreshTimerRef.current = setInterval(async () => {
+          const stored = loadStoredSession();
+          if (!stored) return;
+          const refreshed = await refreshStoredSession(stored);
+          if (refreshed) setSession(refreshed);
+        }, 45 * 60 * 1000);
+      };
+
+      // --- Auth bootstrap: load whichever session is in storage on mount ---
       useEffect(() => {
         if (!settingsLoaded) return;
         if (!authRequired) {
@@ -1687,96 +1778,67 @@
           setAuthChecked(true);
           return;
         }
-        const client = getSupabaseClient(state.settings.supabaseUrl, state.settings.supabaseAnonKey);
-        if (!client) { setAuthChecked(true); return; }
-        let isMounted = true;
-        client.auth.getSession().then(({ data, error }) => {
-          if (!isMounted) return;
-          authLog('getSession() resolved', { hasSession: !!(data && data.session), error: error && error.message });
-          setSession((data && data.session) || null);
-          setAuthChecked(true);
-        }).catch((e) => {
-          authLog('getSession() threw', e && e.message);
-          if (isMounted) setAuthChecked(true);
-        });
-        // Handles every auth lifecycle event, including the two that matter
-        // most for the reported bugs:
-        // - PASSWORD_RECOVERY: fires when the user lands back on this page
-        //   via the "reset password" email link. We show a "set new
-        //   password" form instead of the normal login form.
-        // - TOKEN_REFRESHED: confirms the session is being kept alive
-        //   silently in the background (Issue 2: "sessions persist").
-        const { data: subData } = client.auth.onAuthStateChange((event, newSession) => {
-          authLog('onAuthStateChange: ' + event, { hasSession: !!newSession });
-          if (event === 'PASSWORD_RECOVERY') {
-            setPasswordRecovery(true);
-          }
-          if (event === 'SIGNED_OUT') {
-            setPasswordRecovery(false);
-          }
-          setSession(newSession || null);
-        });
-        return () => {
-          isMounted = false;
-          if (subData && subData.subscription) subData.subscription.unsubscribe();
-        };
+        const stored = loadStoredSession();
+        authLog('session bootstrap', { hasSession: !!stored });
+        setSession(stored);
+        setAuthChecked(true);
+        if (stored) startTokenRefresh();
+        return () => stopTokenRefresh();
       }, [settingsLoaded, authRequired, state.settings.supabaseUrl, state.settings.supabaseAnonKey]);
 
-      const signIn = async (email, password) => {
-        if (authInFlightRef.current) return; // Issue 3: prevent duplicate submissions
+      const signIn = async (email, password, rememberMe) => {
+        if (authInFlightRef.current) return;
         authInFlightRef.current = true;
         setAuthError(null);
         setAuthLoading(true);
         authLog('signIn request', { email });
         try {
-          const client = getSupabaseClient(state.settings.supabaseUrl, state.settings.supabaseAnonKey);
-          const { data, error } = await client.auth.signInWithPassword({ email, password });
-          authLog('signIn response', { hasSession: !!(data && data.session), error: error && error.message });
-          if (error) throw error;
+          const res = await fetch(`${state.settings.supabaseUrl}/auth/v1/token?grant_type=password`, {
+            method: 'POST',
+            headers: { apikey: state.settings.supabaseAnonKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          const data = await res.json();
+          authLog('signIn response', { ok: res.ok, hasToken: !!data.access_token });
+          if (!res.ok) throw new Error((data && (data.error_description || data.msg)) || 'Invalid email or password.');
+          const newSession = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user };
+          saveSession(newSession, !!rememberMe);
+          setSession(newSession);
+          startTokenRefresh();
         } catch (e) {
-          const mapped = mapAuthError(e);
-          authLog('signIn error', mapped);
-          setAuthError(mapped === '__EMAIL_NOT_CONFIRMED__' ? mapped : mapped);
+          authLog('signIn error', e && e.message);
+          setAuthError(mapAuthError(e));
         } finally {
           setAuthLoading(false);
           authInFlightRef.current = false;
         }
       };
 
-      const signUp = async (email, password) => {
-        if (authInFlightRef.current) return; // Issue 3: prevent duplicate submissions
+      const signUp = async (email, password, inviteCode, rememberMe) => {
+        if (authInFlightRef.current) return;
         authInFlightRef.current = true;
         setAuthError(null);
+        if ((inviteCode || '').trim() !== INVITE_CODE) {
+          setAuthError('Invalid invite code.');
+          authInFlightRef.current = false;
+          return;
+        }
         setAuthLoading(true);
-        const redirectTo = getAuthRedirectUrl();
-        authLog('signUp request', { email, redirectTo });
+        authLog('signUp request', { email });
         try {
-          const client = getSupabaseClient(state.settings.supabaseUrl, state.settings.supabaseAnonKey);
-          const { data, error } = await client.auth.signUp({
-            email,
-            password,
-            options: { emailRedirectTo: redirectTo },
+          const res = await fetch(`${state.settings.supabaseUrl}/auth/v1/signup`, {
+            method: 'POST',
+            headers: { apikey: state.settings.supabaseAnonKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
           });
-          authLog('signUp response', {
-            hasSession: !!(data && data.session),
-            hasUser: !!(data && data.user),
-            identitiesCount: data && data.user && data.user.identities ? data.user.identities.length : null,
-            error: error && error.message,
-          });
-          if (error) throw error;
-
-          if (data && data.session) {
-            // Email confirmation is OFF for this Supabase project (Dashboard ->
-            // Authentication -> Sign In / Providers -> Email -> "Confirm email"
-            // is disabled) - the user is signed in immediately, no email is
-            // expected in this case, that's correct behavior.
-          } else if (data && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-            // Supabase's anti-enumeration behavior: signing up with an email
-            // that already has a CONFIRMED account returns a fake user object
-            // with an empty identities array and NO error, so no email is
-            // sent - this looks identical to "no confirmation email" but is
-            // actually "this account already exists".
-            setAuthError('__ALREADY_REGISTERED__');
+          const data = await res.json();
+          authLog('signUp response', { ok: res.ok, hasToken: !!data.access_token });
+          if (!res.ok) throw new Error((data && (data.error_description || data.msg)) || 'Could not create account.');
+          if (data.access_token) {
+            const newSession = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user };
+            saveSession(newSession, !!rememberMe);
+            setSession(newSession);
+            startTokenRefresh();
           } else {
             setAuthError('__CHECK_EMAIL__');
           }
@@ -1788,56 +1850,20 @@
         }
       };
 
-      const resendVerification = async (email) => {
-        setAuthError(null);
-        setAuthLoading(true);
-        const redirectTo = getAuthRedirectUrl();
-        authLog('resend verification request', { email, redirectTo });
-        try {
-          const client = getSupabaseClient(state.settings.supabaseUrl, state.settings.supabaseAnonKey);
-          const { error } = await client.auth.resend({
-            type: 'signup',
-            email,
-            options: { emailRedirectTo: redirectTo },
-          });
-          authLog('resend verification response', { error: error && error.message });
-          if (error) throw error;
-          setAuthError('__CHECK_EMAIL__');
-        } catch (e) {
-          setAuthError(mapAuthError(e));
-        } finally {
-          setAuthLoading(false);
-        }
-      };
-
-      const requestPasswordReset = async (email) => {
-        setAuthError(null);
-        setAuthLoading(true);
-        const redirectTo = getAuthRedirectUrl();
-        authLog('password reset request', { email, redirectTo });
-        try {
-          const client = getSupabaseClient(state.settings.supabaseUrl, state.settings.supabaseAnonKey);
-          const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
-          authLog('password reset response', { error: error && error.message });
-          if (error) throw error;
-          setAuthError('__RESET_EMAIL_SENT__');
-        } catch (e) {
-          setAuthError(mapAuthError(e));
-        } finally {
-          setAuthLoading(false);
-        }
-      };
-
       const updatePassword = async (newPassword) => {
         setAuthError(null);
+        if (!session || !session.access_token) return;
         setAuthLoading(true);
         authLog('update password request');
         try {
-          const client = getSupabaseClient(state.settings.supabaseUrl, state.settings.supabaseAnonKey);
-          const { error } = await client.auth.updateUser({ password: newPassword });
-          authLog('update password response', { error: error && error.message });
-          if (error) throw error;
-          setPasswordRecovery(false);
+          const res = await fetch(`${state.settings.supabaseUrl}/auth/v1/user`, {
+            method: 'PUT',
+            headers: { apikey: state.settings.supabaseAnonKey, Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: newPassword }),
+          });
+          const data = await res.json();
+          authLog('update password response', { ok: res.ok });
+          if (!res.ok) throw new Error((data && (data.error_description || data.msg)) || 'Could not update password.');
           setAuthError('__PASSWORD_UPDATED__');
         } catch (e) {
           setAuthError(mapAuthError(e));
@@ -1848,12 +1874,21 @@
 
       const signOut = async () => {
         authLog('signOut');
-        const client = getSupabaseClient(state.settings.supabaseUrl, state.settings.supabaseAnonKey);
-        if (client) await client.auth.signOut();
+        try {
+          if (session && session.access_token) {
+            await fetch(`${state.settings.supabaseUrl}/auth/v1/logout`, {
+              method: 'POST',
+              headers: { apikey: state.settings.supabaseAnonKey, Authorization: 'Bearer ' + session.access_token },
+            });
+          }
+        } catch (e) {
+          authLog('signOut request failed (clearing local session anyway)', e && e.message);
+        }
+        stopTokenRefresh();
+        clearStoredSession();
         storageRef.current = null;
         setInitialized(false);
         setSession(null);
-        setPasswordRecovery(false);
         dispatch({ type: 'SET_MEETINGS', payload: [] });
       };
 
@@ -2098,12 +2133,9 @@
         session,
         authLoading,
         authError,
-        passwordRecovery,
         signIn,
         signUp,
         signOut,
-        resendVerification,
-        requestPasswordReset,
         updatePassword,
       };
 
@@ -4616,12 +4648,16 @@
     //  SETTINGS COMPONENT
     // ============================================================
     const Settings = () => {
-      const { state, dispatch } = useApp();
+      const { state, dispatch, session, updatePassword, authLoading, authError } = useApp();
       const [draft, setDraft] = useState(state.settings);
       const [showGeminiKey, setShowGeminiKey] = useState(false);
       const [showSupabaseKey, setShowSupabaseKey] = useState(false);
       const [geminiDirty, setGeminiDirty] = useState(false);
       const [supabaseDirty, setSupabaseDirty] = useState(false);
+      const [newPassword, setNewPassword] = useState('');
+      const [confirmPassword, setConfirmPassword] = useState('');
+      const passwordMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+      const passwordTooShort = newPassword.length > 0 && newPassword.length < 6;
 
       // Preferences (language, model choice, auto-summary) are low-risk and
       // apply instantly - no need to gate them behind a Save button.
@@ -4647,6 +4683,13 @@
         });
         setSupabaseDirty(false);
         dispatch({ type: 'SET_SNACKBAR', payload: { message: 'Supabase settings saved', severity: 'success' } });
+      };
+
+      const handleUpdatePassword = async () => {
+        if (!newPassword || passwordMismatch || passwordTooShort) return;
+        await updatePassword(newPassword);
+        setNewPassword('');
+        setConfirmPassword('');
       };
 
       return React.createElement(
@@ -4683,6 +4726,43 @@
                 checked: !!draft.developerMode,
                 onChange: (e) => handlePreferenceChange('developerMode', e.target.checked),
               })
+            )
+          )
+        ),
+        session && React.createElement(
+          Card, { sx: { mb: 3 } },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(Typography, { variant: 'subtitle1', fontWeight: 700, sx: { mb: 2 } }, 'Change Password'),
+            authError && authError !== '__PASSWORD_UPDATED__' && React.createElement(
+              Alert, { severity: 'error', sx: { mb: 2, borderRadius: '12px' } }, authError
+            ),
+            authError === '__PASSWORD_UPDATED__' && React.createElement(
+              Alert, { severity: 'success', sx: { mb: 2, borderRadius: '12px' } }, 'Password updated.'
+            ),
+            React.createElement(
+              Stack, { spacing: 2 },
+              React.createElement(TextField, {
+                fullWidth: true, label: 'New password', type: 'password', value: newPassword,
+                onChange: (e) => setNewPassword(e.target.value), size: 'small', variant: 'outlined',
+                autoComplete: 'new-password', error: passwordTooShort, helperText: passwordTooShort ? 'At least 6 characters' : ' ',
+              }),
+              React.createElement(TextField, {
+                fullWidth: true, label: 'Confirm new password', type: 'password', value: confirmPassword,
+                onChange: (e) => setConfirmPassword(e.target.value), size: 'small', variant: 'outlined',
+                autoComplete: 'new-password', error: passwordMismatch, helperText: passwordMismatch ? "Passwords don't match" : ' ',
+              }),
+              React.createElement(
+                Box, { sx: { display: 'flex', justifyContent: 'flex-end' } },
+                React.createElement(
+                  Button, {
+                    variant: 'contained', size: 'small',
+                    disabled: authLoading || !newPassword || passwordMismatch || passwordTooShort,
+                    onClick: handleUpdatePassword,
+                  },
+                  authLoading ? React.createElement(CircularProgress, { size: 18, sx: { color: '#fff' } }) : 'Update Password'
+                )
+              )
             )
           )
         ),
@@ -4972,42 +5052,34 @@
     //  but the user isn't signed in yet)
     // ============================================================
     const Login = () => {
-      const { signIn, signUp, resendVerification, requestPasswordReset, authLoading, authError } = useApp();
-      // modes: 'signin' | 'signup' | 'forgot'
+      const { signIn, signUp, authLoading, authError } = useApp();
+      // modes: 'signin' | 'signup'
       const [mode, setMode] = useState('signin');
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
+      const [inviteCode, setInviteCode] = useState('');
+      const [rememberMe, setRememberMe] = useState(false);
       const [showPassword, setShowPassword] = useState(false);
-      const [lastAttemptEmail, setLastAttemptEmail] = useState('');
+      const [showForgotHint, setShowForgotHint] = useState(false);
 
       const checkEmail = authError === '__CHECK_EMAIL__';
-      const alreadyRegistered = authError === '__ALREADY_REGISTERED__';
-      const emailNotConfirmed = authError === '__EMAIL_NOT_CONFIRMED__';
-      const resetEmailSent = authError === '__RESET_EMAIL_SENT__';
-      const genericError = authError && !checkEmail && !alreadyRegistered && !emailNotConfirmed && !resetEmailSent;
+      const genericError = authError && !checkEmail;
+      const isFileProtocol = window.location.protocol === 'file:';
 
       const handleSubmit = (e) => {
         e.preventDefault();
-        if (authLoading) return;
-        setLastAttemptEmail(email);
-        if (mode === 'forgot') {
-          if (!email) return;
-          requestPasswordReset(email);
-          return;
-        }
-        if (!email || !password) return;
-        if (mode === 'signin') signIn(email, password);
-        else signUp(email, password);
+        if (authLoading || !email || !password) return;
+        if (mode === 'signin') signIn(email, password, rememberMe);
+        else signUp(email, password, inviteCode, rememberMe);
       };
 
       const switchMode = (next) => {
         setMode(next);
         setPassword('');
+        setShowForgotHint(false);
       };
 
-      const title = mode === 'signin' ? 'Sign in to your account'
-        : mode === 'signup' ? 'Create an account'
-        : 'Reset your password';
+      const title = mode === 'signin' ? 'Sign in to your account' : 'Create an account';
 
       return React.createElement(
         Box, {
@@ -5048,31 +5120,13 @@
               React.createElement(Typography, { variant: 'body2', color: 'text.secondary', sx: { mt: 0.5 } }, title)
             ),
 
+            isFileProtocol && React.createElement(
+              Alert, { severity: 'warning', sx: { mb: 2, borderRadius: '12px' } },
+              "This page is open directly from a file, not a web server. Sign in and sign up will fail (the browser blocks it via CORS). Serve this folder over http/https - e.g. run python3 -m http.server and open http://localhost:8000 - then reload."
+            ),
             checkEmail && React.createElement(
               Alert, { severity: 'success', sx: { mb: 2, borderRadius: '12px' } },
-              'Account created! We sent a confirmation link to ' + (lastAttemptEmail || 'your email') + '. Click it, then sign in here.'
-            ),
-            resetEmailSent && React.createElement(
-              Alert, { severity: 'success', sx: { mb: 2, borderRadius: '12px' } },
-              'If an account exists for ' + (lastAttemptEmail || 'that address') + ', a password reset link is on its way.'
-            ),
-            alreadyRegistered && React.createElement(
-              Alert, { severity: 'info', sx: { mb: 2, borderRadius: '12px' } },
-              'An account already exists for this email. Try signing in, or use "Forgot password?" below.'
-            ),
-            emailNotConfirmed && React.createElement(
-              Alert, {
-                severity: 'warning', sx: { mb: 2, borderRadius: '12px' },
-                action: React.createElement(
-                  Button, {
-                    color: 'inherit', size: 'small',
-                    onClick: () => resendVerification(email || lastAttemptEmail),
-                    disabled: authLoading || !(email || lastAttemptEmail),
-                  },
-                  'Resend'
-                )
-              },
-              'Please confirm your email before signing in.'
+              'Account created - welcome to the team! Check your email to confirm, then sign in.'
             ),
             genericError && React.createElement(
               Alert, { severity: 'error', sx: { mb: 2, borderRadius: '12px' } },
@@ -5088,7 +5142,7 @@
                   onChange: (e) => setEmail(e.target.value), size: 'small', variant: 'outlined', autoFocus: true,
                   autoComplete: 'email',
                 }),
-                mode !== 'forgot' && React.createElement(TextField, {
+                React.createElement(TextField, {
                   fullWidth: true, label: 'Password', type: showPassword ? 'text' : 'password', value: password,
                   onChange: (e) => setPassword(e.target.value), size: 'small', variant: 'outlined',
                   autoComplete: mode === 'signin' ? 'current-password' : 'new-password',
@@ -5103,113 +5157,66 @@
                     )
                   }
                 }),
-                mode === 'signin' && React.createElement(
-                  Box, { sx: { textAlign: 'right', mt: -1 } },
+                mode === 'signup' && React.createElement(TextField, {
+                  fullWidth: true, label: 'Invite Code', value: inviteCode,
+                  onChange: (e) => setInviteCode(e.target.value), size: 'small', variant: 'outlined',
+                  placeholder: 'Staff invite code',
+                  helperText: 'Ask your admin for the studio invite code.',
+                }),
+                React.createElement(
+                  Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: -1 } },
                   React.createElement(
+                    FormControlLabel, {
+                      control: React.createElement(Checkbox, {
+                        size: 'small',
+                        checked: rememberMe,
+                        onChange: (e) => setRememberMe(e.target.checked),
+                      }),
+                      label: React.createElement(Typography, { variant: 'body2', color: 'text.secondary' }, 'Remember me'),
+                    }
+                  ),
+                  mode === 'signin' && React.createElement(
                     'a', {
                       href: '#',
-                      onClick: (e) => { e.preventDefault(); switchMode('forgot'); },
+                      onClick: (e) => { e.preventDefault(); setShowForgotHint(true); },
                       style: { color: COLORS.primary, fontSize: 13, fontWeight: 600, textDecoration: 'none', cursor: 'pointer' }
                     },
                     'Forgot password?'
                   )
                 ),
+                showForgotHint && React.createElement(
+                  Alert, { severity: 'info', sx: { borderRadius: '12px' }, onClose: () => setShowForgotHint(false) },
+                  'Studio staff only. Contact your admin if you need an account or a password reset.'
+                ),
                 React.createElement(
                   Button, {
                     fullWidth: true, type: 'submit', variant: 'contained', size: 'large',
-                    disabled: authLoading || !email || (mode !== 'forgot' && !password),
+                    disabled: authLoading || !email || !password,
                     sx: { borderRadius: '10px', textTransform: 'none', fontWeight: 600, py: 1.2 }
                   },
                   authLoading
                     ? React.createElement(CircularProgress, { size: 22, sx: { color: '#fff' } })
-                    : (mode === 'signin' ? 'Sign In' : mode === 'signup' ? 'Sign Up' : 'Send reset link')
+                    : (mode === 'signin' ? 'Sign In' : 'Create account')
+                ),
+                React.createElement(
+                  Typography, { variant: 'caption', color: 'text.secondary', sx: { textAlign: 'center', display: 'block' } },
+                  'Your data is secure and encrypted.'
                 )
               )
             ),
 
             React.createElement(
               Box, { sx: { textAlign: 'center', mt: 3 } },
-              mode === 'forgot'
-                ? React.createElement(
-                    Typography, { variant: 'body2', color: 'text.secondary' },
-                    React.createElement(
-                      'a', {
-                        href: '#',
-                        onClick: (e) => { e.preventDefault(); switchMode('signin'); },
-                        style: { color: COLORS.primary, fontWeight: 600, textDecoration: 'none', cursor: 'pointer' }
-                      },
-                      '\u2190 Back to sign in'
-                    )
-                  )
-                : React.createElement(
-                    Typography, { variant: 'body2', color: 'text.secondary' },
-                    mode === 'signin' ? "Don't have an account? " : 'Already have an account? ',
-                    React.createElement(
-                      'a', {
-                        href: '#',
-                        onClick: (e) => { e.preventDefault(); switchMode(mode === 'signin' ? 'signup' : 'signin'); },
-                        style: { color: COLORS.primary, fontWeight: 600, textDecoration: 'none', cursor: 'pointer' }
-                      },
-                      mode === 'signin' ? 'Sign up' : 'Sign in'
-                    )
-                  )
-            )
-          )
-        )
-      );
-    };
-
-    // ============================================================
-    //  RESET PASSWORD SCREEN (shown after the user clicks the password
-    //  reset link in their email and lands back on this page)
-    // ============================================================
-    const ResetPasswordScreen = () => {
-      const { updatePassword, authLoading, authError } = useApp();
-      const [password, setPassword] = useState('');
-      const [confirm, setConfirm] = useState('');
-      const mismatch = confirm.length > 0 && password !== confirm;
-      const tooShort = password.length > 0 && password.length < 6;
-
-      const handleSubmit = (e) => {
-        e.preventDefault();
-        if (authLoading || !password || mismatch || tooShort) return;
-        updatePassword(password);
-      };
-
-      return React.createElement(
-        Box, {
-          sx: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 2 }
-        },
-        React.createElement(
-          Card, { sx: { width: '100%', maxWidth: 400, borderRadius: { xs: '16px', sm: '20px' }, boxShadow: '0 8px 32px rgba(0,0,0,0.08)' } },
-          React.createElement(
-            CardContent, { sx: { p: { xs: 3, sm: 4 } } },
-            React.createElement(Typography, { variant: 'h5', fontWeight: 700, sx: { mb: 0.5 } }, 'Set a new password'),
-            React.createElement(Typography, { variant: 'body2', color: 'text.secondary', sx: { mb: 2 } }, 'Choose a new password for your account.'),
-            authError && authError !== '__PASSWORD_UPDATED__' && React.createElement(
-              Alert, { severity: 'error', sx: { mb: 2, borderRadius: '12px' } }, authError
-            ),
-            React.createElement(
-              'form', { onSubmit: handleSubmit },
               React.createElement(
-                Stack, { spacing: 2 },
-                React.createElement(TextField, {
-                  fullWidth: true, label: 'New password', type: 'password', value: password,
-                  onChange: (e) => setPassword(e.target.value), size: 'small', variant: 'outlined', autoFocus: true,
-                  autoComplete: 'new-password', error: tooShort, helperText: tooShort ? 'At least 6 characters' : ' ',
-                }),
-                React.createElement(TextField, {
-                  fullWidth: true, label: 'Confirm new password', type: 'password', value: confirm,
-                  onChange: (e) => setConfirm(e.target.value), size: 'small', variant: 'outlined',
-                  autoComplete: 'new-password', error: mismatch, helperText: mismatch ? "Passwords don't match" : ' ',
-                }),
+                Typography, { variant: 'body2', color: 'text.secondary' },
+                mode === 'signin' ? "New here? " : 'Already have an account? ',
                 React.createElement(
-                  Button, {
-                    fullWidth: true, type: 'submit', variant: 'contained', size: 'large',
-                    disabled: authLoading || !password || mismatch || tooShort,
-                    sx: { borderRadius: '10px', textTransform: 'none', fontWeight: 600, py: 1.2 }
+                  'a', {
+                    href: '#',
+                    onClick: (e) => { e.preventDefault(); switchMode(mode === 'signin' ? 'signup' : 'signin'); },
+                    style: { color: COLORS.primary, fontWeight: 600, textDecoration: 'none', cursor: 'pointer' }
                   },
-                  authLoading ? React.createElement(CircularProgress, { size: 22, sx: { color: '#fff' } }) : 'Update password'
+                  mode === 'signin' ? 'Create an account' : 'Sign in'
                 )
               )
             )
@@ -5222,7 +5229,7 @@
     //  MAIN APP
     // ============================================================
     const App = () => {
-      const { state, dispatch, initialized, authRequired, session, passwordRecovery } = useApp();
+      const { state, dispatch, initialized, authRequired, session } = useApp();
       const themeMode = state.darkMode ? 'dark' : 'light';
 
       const theme = useMemo(() => {
@@ -5374,17 +5381,6 @@
         return React.createElement(
           Box, { sx: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' } },
           React.createElement(CircularProgress)
-        );
-      }
-
-      if (authRequired && passwordRecovery) {
-        // Clicking a "reset password" email link signs the user into a
-        // temporary recovery session - show the "set new password" screen
-        // instead of the normal app, regardless of whether `session` is set.
-        return React.createElement(
-          ThemeProvider, { theme },
-          React.createElement(CssBaseline),
-          React.createElement(ResetPasswordScreen)
         );
       }
 
