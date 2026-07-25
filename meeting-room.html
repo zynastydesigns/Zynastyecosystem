@@ -5,24 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Meeting Assistant (Supabase + Storage + RPC)</title>
 
-  <!-- ============================================================
-       IMPORT MAP - must come before any <script type="module">.
-       Maps the bare "react" specifier to a tiny inline shim that
-       re-exports window.React (set by the classic UMD <script> below).
-       This is what lets the @mui/icons-material ESM import further
-       down mark "react" as ?external=react and still get the SAME
-       React instance as the rest of the page, instead of esm.sh
-       bundling its own private copy - which is what was causing the
-       "Cannot read properties of null (reading 'useContext')" crashes
-       (two different React copies fighting over hook dispatch state).
-  ============================================================ -->
-  <script type="importmap">
-  {
-    "imports": {
-      "react": "data:text/javascript;base64,Y29uc3QgUiA9IHdpbmRvdy5SZWFjdDsKZXhwb3J0IGRlZmF1bHQgUjsKZXhwb3J0IGNvbnN0IHsKICBDaGlsZHJlbiwgQ29tcG9uZW50LCBGcmFnbWVudCwgUHJvZmlsZXIsIFB1cmVDb21wb25lbnQsIFN0cmljdE1vZGUsIFN1c3BlbnNlLAogIGNsb25lRWxlbWVudCwgY3JlYXRlQ29udGV4dCwgY3JlYXRlRWxlbWVudCwgY3JlYXRlRmFjdG9yeSwgY3JlYXRlUmVmLCBmb3J3YXJkUmVmLAogIGlzVmFsaWRFbGVtZW50LCBsYXp5LCBtZW1vLCB1c2VDYWxsYmFjaywgdXNlQ29udGV4dCwgdXNlRGVidWdWYWx1ZSwgdXNlRWZmZWN0LAogIHVzZUlkLCB1c2VJbXBlcmF0aXZlSGFuZGxlLCB1c2VJbnNlcnRpb25FZmZlY3QsIHVzZUxheW91dEVmZmVjdCwgdXNlTWVtbywKICB1c2VSZWR1Y2VyLCB1c2VSZWYsIHVzZVN0YXRlLCB1c2VTeW5jRXh0ZXJuYWxTdG9yZSwgdXNlVHJhbnNpdGlvbiwgdmVyc2lvbgp9ID0gUjsK"
-    }
-  }
-  </script>
+  <!-- The import map that used to sit here only existed to support a
+       dynamic `import('https://esm.sh/@mui/icons-material...')` for
+       icons. That import has been removed (see the ICON LIBRARY
+       section in the app script) in favor of self-contained inline
+       SVG icons, so the import map - and the ES module bridge script
+       that used it - are no longer needed at all. -->
 
   <!-- ============================================================
        STARTUP DIAGNOSTICS BOOTSTRAP
@@ -133,7 +121,7 @@
                 '<div style="font-size:13px;color:#1a1a2e;background:#eafaf1;padding:8px 10px;border-radius:8px;">' + fix + '</div>' +
               '</div>' +
               '<div style="margin-top:16px;display:flex;gap:8px;">' +
-                '<button onclick="location.reload()" style="cursor:pointer;border:none;border-radius:10px;padding:8px 16px;background:#6C5CE7;color:#fff;font-weight:600;font-size:13px;">Reload</button>' +
+                '<button onclick="location.reload()" style="cursor:pointer;border:none;border-radius:10px;padding:8px 16px;background:#5B5FEF;color:#fff;font-weight:600;font-size:13px;">Reload</button>' +
               '</div>' +
             '</div>';
         } catch (renderErr) {
@@ -194,9 +182,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700;800&display=swap" rel="stylesheet" />
 
-  <!-- Material Icons -->
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
-
   <!-- React & ReactDOM -->
   <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"
     onload="window.__markStep('React Loaded', true)"
@@ -207,7 +192,7 @@
 
   <!-- Babel Standalone -->
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"
-    onload="Babel.disableScriptTags(); window.__markStep('Babel Loaded', true)"
+    onload="window.__markStep('Babel Loaded', true)"
     onerror="window.__markStep('Babel Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load Babel Standalone from CDN', filename:'babel.min.js', failedStep:'Babel Loaded'});"></script>
 
   <!-- Emotion & MUI -->
@@ -227,25 +212,23 @@
     onerror="window.__markStep('Supabase JS Loaded', false, 'CDN script failed to load'); window.__showDiagnostic({message:'Failed to load @supabase/supabase-js from CDN', filename:'supabase.min.js', failedStep:'Supabase JS Loaded'});"></script>
 
   <!-- ============================================================
-       BRIDGE SCRIPT (native ES module - NOT processed by Babel)
-       The app code below expects window['@mui/material'],
-       window['@mui/material/styles'], and window['@mui/icons-material']
-       to exist. The MUI UMD CDN build actually exposes a single global
-       named `MaterialUI` (not those bracket keys), and @mui/icons-material
-       has never shipped a UMD/CDN build at all (v5+), so it's loaded via
-       esm.sh with ?external=react (see the import map above) - this
-       keeps it on the SAME React instance as the rest of the page,
-       instead of bundling its own private copy, which was previously
-       causing "Cannot read properties of null (reading 'useContext')"
-       render crashes from two React copies fighting over hook state.
-       Babel Standalone's automatic DOMContentLoaded-triggered
-       transform is disabled (see Babel.disableScriptTags() above), and
-       this module calls Babel.transformScriptTags() itself once the
-       icons are resolved (real or placeholder), so the app script below
-       is guaranteed to run only after the globals it needs exist.
+       BRIDGE SCRIPT
+       The app code expects window['@mui/material'] and
+       window['@mui/material/styles'] to exist. The MUI UMD CDN build
+       actually exposes a single global named `MaterialUI` (not those
+       bracket keys), so this just aliases it. This used to also have
+       to asynchronously load @mui/icons-material via a dynamic
+       import() from esm.sh (no UMD build of that package has ever
+       existed) - that import was unreliable over flaky/blocked
+       networks and silently fell back to blank placeholder icons.
+       It has been removed entirely: every icon the app uses is now a
+       small inline SVG defined directly in the app script (see the
+       ICON LIBRARY section), built on top of @mui/material's own
+       <SvgIcon>, so there is nothing left to fetch or wait for here.
+       This is a plain synchronous classic script, so it always runs
+       before the Babel-processed app script below it.
   ============================================================ -->
-  <script type="module">
-    // --- Bridge @mui/material -> the global the CDN script really sets ---
+  <script>
     if (window.MaterialUI) {
       window['@mui/material'] = window.MaterialUI;
       window['@mui/material/styles'] = window.MaterialUI;
@@ -253,48 +236,6 @@
     } else {
       window.__markStep && window.__markStep('Material UI global bridged', false, 'window.MaterialUI was not set - check CDN load above');
     }
-
-    // --- Load @mui/icons-material via a working ESM CDN (no UMD build exists) ---
-    const withTimeout = (promise, ms) => Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Icon module import timed out after ' + ms + 'ms')), ms)),
-    ]);
-
-    try {
-      // NOTE: this used to rely on module top-level await delaying
-      // DOMContentLoaded (and therefore Babel's auto-transform) until
-      // this resolved. That ordering isn't reliable across browsers, so
-      // Babel's auto-run is disabled instead, and transformScriptTags()
-      // is called explicitly below once this settles either way.
-      const iconsModule = await withTimeout(
-        import('https://esm.sh/@mui/icons-material@5.14.20?external=react'),
-        8000
-      );
-      window['@mui/icons-material'] = iconsModule;
-      window.__markStep && window.__markStep('Material UI Icons Loaded', true, 'via ESM CDN');
-    } catch (e) {
-      console.warn('Icon module failed to load, falling back to placeholder icons (offline mode):', e);
-      window.__markStep && window.__markStep('Material UI Icons Loaded', false, (e && e.message) || 'ESM import failed');
-      // Fallback: return a harmless placeholder icon component for ANY
-      // requested icon name, so destructuring never crashes and the
-      // app still renders (just without real icon glyphs).
-      const PlaceholderIcon = (props) => {
-        return React.createElement('span', Object.assign({
-          style: { display: 'inline-block', width: '1em', height: '1em', borderRadius: '50%', border: '1.5px solid currentColor', verticalAlign: 'middle' }
-        }, props));
-      };
-      window['@mui/icons-material'] = new Proxy({}, {
-        get: () => PlaceholderIcon,
-      });
-    }
-
-    window.__iconsBridgeReady = true;
-    // Babel Standalone's auto-run on DOMContentLoaded was disabled above
-    // (Babel.disableScriptTags()) precisely so this line - not that event -
-    // is what decides when the app script below gets transformed and run.
-    // This guarantees window['@mui/icons-material'] is always populated
-    // (real icons or the placeholder Proxy) before that code executes.
-    window.Babel && window.Babel.transformScriptTags();
   </script>
 
   <style>
@@ -311,7 +252,7 @@
     }
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #f5f7fb;
+      background: #F7F8FC;
       overflow-x: hidden;
       min-height: 100vh;
     }
@@ -354,6 +295,14 @@
         transform: rotate(360deg);
       }
     }
+    @keyframes waveBar {
+      0%, 100% { transform: scaleY(0.3); }
+      50% { transform: scaleY(1); }
+    }
+    @keyframes micGlow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.35), 0 8px 32px rgba(239,68,68,0.25); }
+      50% { box-shadow: 0 0 0 18px rgba(239,68,68,0), 0 8px 32px rgba(239,68,68,0.25); }
+    }
     .fade-in-up {
       animation: fadeInUp 0.5s ease forwards;
     }
@@ -373,13 +322,13 @@
     }
     .loading-screen {
       text-align: center;
-      color: #6C5CE7;
+      color: #5B5FEF;
     }
     .loading-screen .spinner {
       width: 48px;
       height: 48px;
       border: 4px solid rgba(108, 92, 231, 0.1);
-      border-top-color: #6C5CE7;
+      border-top-color: #5B5FEF;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
       margin: 0 auto 16px;
@@ -516,85 +465,425 @@
       Input,
       OutlinedInput,
       FormHelperText,
+      SvgIcon,
     } = window['@mui/material'];
 
     const { responsiveFontSizes } = window['@mui/material/styles'];
 
-    const icons = window['@mui/icons-material'];
-    const {
-      Dashboard: DashboardIcon,
-      Mic: MicIcon,
-      History: HistoryIcon,
-      Settings: SettingsIcon,
-      Description: DescriptionIcon,
-      Search: SearchIcon,
-      PlayArrow: PlayArrowIcon,
-      Pause: PauseIcon,
-      Stop: StopIcon,
-      CheckCircle: CheckCircleIcon,
-      Timer: TimerIcon,
-      MeetingRoom: MeetingRoomIcon,
-      Today: TodayIcon,
-      Checklist: ChecklistIcon,
-      Save: SaveIcon,
-      Summarize: SummarizeIcon,
-      AutoAwesome: AutoAwesomeIcon,
-      Close: CloseIcon,
-      Menu: MenuIcon,
-      Notifications: NotificationsIcon,
-      Person: PersonIcon,
-      Business: BusinessIcon,
-      EventNote: EventNoteIcon,
-      ContentCopy: ContentCopyIcon,
-      FileDownload: FileDownloadIcon,
-      Delete: DeleteIcon,
-      Share: ShareIcon,
-      ExpandLess: ExpandLessIcon,
-      ExpandMore: ExpandMoreIcon,
-      ArrowBack: ArrowBackIcon,
-      Launch: LaunchIcon,
-      MoreVert: MoreVertIcon,
-      CloudUpload: CloudUploadIcon,
-      GraphicEq: GraphicEqIcon,
-      RecordVoiceOver: RecordVoiceOverIcon,
-      SmartToy: SmartToyIcon,
-      Psychology: PsychologyIcon,
-      LightMode: LightModeIcon,
-      DarkMode: DarkModeIcon,
-      Download: DownloadIcon,
-      Upload: UploadIcon,
-      OpenInNew: OpenInNewIcon,
-      Link: LinkIcon,
-      WhatsApp: WhatsAppIcon,
-      Email: EmailIcon,
-      Telegram: TelegramIcon,
-      Send: SendIcon,
-      Warning: WarningIcon,
-      Info: InfoIcon,
-      Error: ErrorIcon,
-      Verified: VerifiedIcon,
-      Flag: FlagIcon,
-      Schedule: ScheduleIcon,
-      Groups: GroupsIcon,
-      Chat: ChatIcon,
-      ListAlt: ListAltIcon,
-      Visibility: VisibilityIcon,
-      VisibilityOff: VisibilityOffIcon,
-      Lock: LockIcon,
-    } = icons;
+    // ============================================================
+    //  ICON LIBRARY (self-contained, zero network dependency)
+    // ------------------------------------------------------------
+    //  @mui/icons-material has never shipped a UMD/CDN build, so it
+    //  previously had to be pulled in at runtime via a dynamic
+    //  `import('https://esm.sh/@mui/icons-material...')` inside a
+    //  <script type="module"> in <head>. That import is exactly the
+    //  kind of unreliable dependency that breaks in the wild: slow
+    //  networks, blocked/throttled esm.sh requests, or an 8s timeout
+    //  all silently fell back to a Proxy of empty circular
+    //  placeholder icons (see the removed fallback in <head>) - which
+    //  is why every icon in the app could render as a blank circle.
+    //
+    //  Fix: every icon below is a small inline SVG, in the Lucide
+    //  icon style (24x24, stroke-based, rounded caps/joins), wrapped
+    //  in MUI's <SvgIcon>. SvgIcon ships inside @mui/material itself
+    //  (already loaded reliably via the classic UMD <script> tag and
+    //  bridged to window['@mui/material'] above) - so there is no
+    //  second library, no dynamic import, and no network dependency
+    //  at all for icons. Every icon still supports the same props
+    //  the rest of the app already uses (sx, fontSize, style, color),
+    //  because SvgIcon is the exact same base class MUI's own
+    //  generated icon components use internally.
+    // ============================================================
+    const LucideIcon = ({ children, ...props }) => React.createElement(
+      SvgIcon,
+      Object.assign({
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 2,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+      }, props),
+      children
+    );
+
+    const DashboardIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 3, y: 3, width: 7, height: 9, rx: 1.5 }),
+      React.createElement('rect', { x: 14, y: 3, width: 7, height: 5, rx: 1.5 }),
+      React.createElement('rect', { x: 14, y: 12, width: 7, height: 9, rx: 1.5 }),
+      React.createElement('rect', { x: 3, y: 16, width: 7, height: 5, rx: 1.5 })
+    );
+
+    const MicIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 9, y: 2, width: 6, height: 12, rx: 3 }),
+      React.createElement('path', { d: 'M19 10v1a7 7 0 0 1-14 0v-1' }),
+      React.createElement('line', { x1: 12, y1: 18, x2: 12, y2: 22 }),
+      React.createElement('line', { x1: 8, y1: 22, x2: 16, y2: 22 })
+    );
+
+    const HistoryIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M3 12a9 9 0 1 0 3-6.7' }),
+      React.createElement('polyline', { points: '3 4 3 9 8 9' }),
+      React.createElement('polyline', { points: '12 7 12 12 16 14' })
+    );
+
+    const SettingsIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 12, r: 3 }),
+      React.createElement('path', { d: 'M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.96 19a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15Z' })
+    );
+
+    const DescriptionIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z' }),
+      React.createElement('polyline', { points: '14 2 14 8 20 8' }),
+      React.createElement('line', { x1: 8, y1: 13, x2: 16, y2: 13 }),
+      React.createElement('line', { x1: 8, y1: 17, x2: 16, y2: 17 }),
+      React.createElement('line', { x1: 8, y1: 9, x2: 10, y2: 9 })
+    );
+
+    const SearchIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 11, cy: 11, r: 7 }),
+      React.createElement('line', { x1: 21, y1: 21, x2: 16.65, y2: 16.65 })
+    );
+
+    const PlayArrowIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('polygon', { points: '6 3 20 12 6 21 6 3', fill: 'currentColor', stroke: 'none' })
+    );
+
+    const PauseIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 6, y: 4, width: 4, height: 16, rx: 1, fill: 'currentColor', stroke: 'none' }),
+      React.createElement('rect', { x: 14, y: 4, width: 4, height: 16, rx: 1, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const StopIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 5, y: 5, width: 14, height: 14, rx: 2, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const CheckCircleIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 12, r: 9 }),
+      React.createElement('polyline', { points: '8.5 12.5 11 15 16 9' })
+    );
+
+    const TimerIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 13, r: 8 }),
+      React.createElement('polyline', { points: '12 9 12 13 14.5 15' }),
+      React.createElement('line', { x1: 9, y1: 2, x2: 15, y2: 2 })
+    );
+
+    const MeetingRoomIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }),
+      React.createElement('path', { d: 'M3 10h18' }),
+      React.createElement('circle', { cx: 12, cy: 15, r: 1.6, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const TodayIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 3, y: 4, width: 18, height: 17, rx: 2 }),
+      React.createElement('line', { x1: 3, y1: 9, x2: 21, y2: 9 }),
+      React.createElement('line', { x1: 8, y1: 2, x2: 8, y2: 6 }),
+      React.createElement('line', { x1: 16, y1: 2, x2: 16, y2: 6 }),
+      React.createElement('circle', { cx: 12, cy: 15, r: 2, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const ChecklistIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('polyline', { points: '3 6 4.5 7.5 7.5 4.5' }),
+      React.createElement('line', { x1: 11, y1: 6, x2: 21, y2: 6 }),
+      React.createElement('polyline', { points: '3 13 4.5 14.5 7.5 11.5' }),
+      React.createElement('line', { x1: 11, y1: 13, x2: 21, y2: 13 }),
+      React.createElement('polyline', { points: '3 20 4.5 21.5 7.5 18.5' }),
+      React.createElement('line', { x1: 11, y1: 20, x2: 21, y2: 20 })
+    );
+
+    const SaveIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z' }),
+      React.createElement('polyline', { points: '17 21 17 13 7 13 7 21' }),
+      React.createElement('polyline', { points: '7 3 7 8 15 8' })
+    );
+
+    const SummarizeIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M4 3h16v13l-4 4H4Z' }),
+      React.createElement('line', { x1: 8, y1: 8, x2: 16, y2: 8 }),
+      React.createElement('line', { x1: 8, y1: 12, x2: 13, y2: 12 })
+    );
+
+    const AutoAwesomeIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M12 3v4M12 17v4M5 5l2.5 2.5M16.5 16.5 19 19M3 12h4M17 12h4M5 19l2.5-2.5M16.5 7.5 19 5', stroke: 'none' }),
+      React.createElement('path', { d: 'M11 4 12.6 8.4 17 10 12.6 11.6 11 16 9.4 11.6 5 10 9.4 8.4Z', fill: 'currentColor', stroke: 'none' }),
+      React.createElement('path', { d: 'M18 14l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9Z', fill: 'currentColor', stroke: 'none' })
+    );
+
+    const CloseIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('line', { x1: 18, y1: 6, x2: 6, y2: 18 }),
+      React.createElement('line', { x1: 6, y1: 6, x2: 18, y2: 18 })
+    );
+
+    const MenuIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('line', { x1: 3, y1: 6, x2: 21, y2: 6 }),
+      React.createElement('line', { x1: 3, y1: 12, x2: 21, y2: 12 }),
+      React.createElement('line', { x1: 3, y1: 18, x2: 21, y2: 18 })
+    );
+
+    const NotificationsIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z' }),
+      React.createElement('path', { d: 'M10.3 21a1.94 1.94 0 0 0 3.4 0' })
+    );
+
+    const PersonIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 8, r: 4 }),
+      React.createElement('path', { d: 'M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8' })
+    );
+
+    const BusinessIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 4, y: 3, width: 10, height: 18 }),
+      React.createElement('rect', { x: 16, y: 9, width: 4, height: 12 }),
+      React.createElement('line', { x1: 7, y1: 7, x2: 7, y2: 7.01 }),
+      React.createElement('line', { x1: 11, y1: 7, x2: 11, y2: 7.01 }),
+      React.createElement('line', { x1: 7, y1: 11, x2: 7, y2: 11.01 }),
+      React.createElement('line', { x1: 11, y1: 11, x2: 11, y2: 11.01 }),
+      React.createElement('line', { x1: 7, y1: 15, x2: 7, y2: 15.01 }),
+      React.createElement('line', { x1: 11, y1: 15, x2: 11, y2: 15.01 })
+    );
+
+    const EventNoteIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 3, y: 4, width: 18, height: 17, rx: 2 }),
+      React.createElement('line', { x1: 3, y1: 9, x2: 21, y2: 9 }),
+      React.createElement('line', { x1: 8, y1: 2, x2: 8, y2: 6 }),
+      React.createElement('line', { x1: 16, y1: 2, x2: 16, y2: 6 }),
+      React.createElement('line', { x1: 7, y1: 13, x2: 13, y2: 13 }),
+      React.createElement('line', { x1: 7, y1: 17, x2: 11, y2: 17 })
+    );
+
+    const ContentCopyIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 9, y: 9, width: 12, height: 12, rx: 2 }),
+      React.createElement('path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' })
+    );
+
+    const FileDownloadIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z' }),
+      React.createElement('polyline', { points: '14 2 14 8 20 8' }),
+      React.createElement('line', { x1: 12, y1: 11, x2: 12, y2: 17 }),
+      React.createElement('polyline', { points: '9.5 14.5 12 17 14.5 14.5' })
+    );
+
+    const DeleteIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('polyline', { points: '3 6 5 6 21 6' }),
+      React.createElement('path', { d: 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6h14Z' }),
+      React.createElement('line', { x1: 10, y1: 11, x2: 10, y2: 17 }),
+      React.createElement('line', { x1: 14, y1: 11, x2: 14, y2: 17 })
+    );
+
+    const ShareIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 18, cy: 5, r: 3 }),
+      React.createElement('circle', { cx: 6, cy: 12, r: 3 }),
+      React.createElement('circle', { cx: 18, cy: 19, r: 3 }),
+      React.createElement('line', { x1: 8.6, y1: 10.5, x2: 15.4, y2: 6.5 }),
+      React.createElement('line', { x1: 8.6, y1: 13.5, x2: 15.4, y2: 17.5 })
+    );
+
+    const ExpandLessIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('polyline', { points: '18 15 12 9 6 15' })
+    );
+
+    const ExpandMoreIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('polyline', { points: '6 9 12 15 18 9' })
+    );
+
+    const ArrowBackIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('line', { x1: 19, y1: 12, x2: 5, y2: 12 }),
+      React.createElement('polyline', { points: '12 19 5 12 12 5' })
+    );
+
+    const LaunchIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6' }),
+      React.createElement('polyline', { points: '15 3 21 3 21 9' }),
+      React.createElement('line', { x1: 10, y1: 14, x2: 21, y2: 3 })
+    );
+
+    const MoreVertIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 5, r: 1.4, fill: 'currentColor', stroke: 'none' }),
+      React.createElement('circle', { cx: 12, cy: 12, r: 1.4, fill: 'currentColor', stroke: 'none' }),
+      React.createElement('circle', { cx: 12, cy: 19, r: 1.4, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const CloudUploadIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M7 18a5 5 0 0 1-1-9.9 6 6 0 0 1 11.6-2A4.5 4.5 0 0 1 17 18Z' }),
+      React.createElement('polyline', { points: '9 14 12 11 15 14' }),
+      React.createElement('line', { x1: 12, y1: 11, x2: 12, y2: 21 })
+    );
+
+    const GraphicEqIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('line', { x1: 4, y1: 10, x2: 4, y2: 14 }),
+      React.createElement('line', { x1: 8, y1: 6, x2: 8, y2: 18 }),
+      React.createElement('line', { x1: 12, y1: 3, x2: 12, y2: 21 }),
+      React.createElement('line', { x1: 16, y1: 7, x2: 16, y2: 17 }),
+      React.createElement('line', { x1: 20, y1: 10, x2: 20, y2: 14 })
+    );
+
+    const RecordVoiceOverIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 9, cy: 6, r: 3 }),
+      React.createElement('path', { d: 'M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6' }),
+      React.createElement('path', { d: 'M18 8a4 4 0 0 1 0 8' }),
+      React.createElement('path', { d: 'M20.5 5.5a8 8 0 0 1 0 13' })
+    );
+
+    const SmartToyIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 4, y: 9, width: 16, height: 11, rx: 2 }),
+      React.createElement('circle', { cx: 9, cy: 14.5, r: 1.2, fill: 'currentColor', stroke: 'none' }),
+      React.createElement('circle', { cx: 15, cy: 14.5, r: 1.2, fill: 'currentColor', stroke: 'none' }),
+      React.createElement('line', { x1: 12, y1: 9, x2: 12, y2: 5 }),
+      React.createElement('circle', { cx: 12, cy: 3.5, r: 1.5, fill: 'currentColor', stroke: 'none' }),
+      React.createElement('line', { x1: 1, y1: 14, x2: 4, y2: 14 }),
+      React.createElement('line', { x1: 20, y1: 14, x2: 23, y2: 14 })
+    );
+
+    const PsychologyIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M12 3a4 4 0 0 0-4 4 3.5 3.5 0 0 0-1 6.8V16a3 3 0 0 0 3 3h1v2' }),
+      React.createElement('path', { d: 'M12 3a4 4 0 0 1 4 4 3.5 3.5 0 0 1 1 6.8V16a3 3 0 0 1-3 3' }),
+      React.createElement('line', { x1: 12, y1: 7, x2: 12, y2: 16 })
+    );
+
+    const LightModeIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 12, r: 4.5 }),
+      React.createElement('line', { x1: 12, y1: 1.5, x2: 12, y2: 4 }),
+      React.createElement('line', { x1: 12, y1: 20, x2: 12, y2: 22.5 }),
+      React.createElement('line', { x1: 4.2, y1: 4.2, x2: 5.9, y2: 5.9 }),
+      React.createElement('line', { x1: 18.1, y1: 18.1, x2: 19.8, y2: 19.8 }),
+      React.createElement('line', { x1: 1.5, y1: 12, x2: 4, y2: 12 }),
+      React.createElement('line', { x1: 20, y1: 12, x2: 22.5, y2: 12 }),
+      React.createElement('line', { x1: 4.2, y1: 19.8, x2: 5.9, y2: 18.1 }),
+      React.createElement('line', { x1: 18.1, y1: 5.9, x2: 19.8, y2: 4.2 })
+    );
+
+    const DarkModeIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z' })
+    );
+
+    const DownloadIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
+      React.createElement('polyline', { points: '7 10 12 15 17 10' }),
+      React.createElement('line', { x1: 12, y1: 15, x2: 12, y2: 3 })
+    );
+
+    const UploadIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
+      React.createElement('polyline', { points: '17 8 12 3 7 8' }),
+      React.createElement('line', { x1: 12, y1: 3, x2: 12, y2: 15 })
+    );
+
+    const OpenInNewIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6' }),
+      React.createElement('polyline', { points: '15 3 21 3 21 9' }),
+      React.createElement('line', { x1: 10, y1: 14, x2: 21, y2: 3 })
+    );
+
+    const LinkIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M9 17H7a5 5 0 0 1 0-10h2' }),
+      React.createElement('path', { d: 'M15 7h2a5 5 0 0 1 0 10h-2' }),
+      React.createElement('line', { x1: 8, y1: 12, x2: 16, y2: 12 })
+    );
+
+    const WhatsAppIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M3 21l1.4-4.2A8 8 0 1 1 8 19.6Z' }),
+      React.createElement('path', { d: 'M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.8-2-1-1 .8a4 4 0 0 1-2.5-2.5l.8-1-1-2Z', fill: 'currentColor', stroke: 'none' })
+    );
+
+    const EmailIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 2, y: 4, width: 20, height: 16, rx: 2 }),
+      React.createElement('polyline', { points: '2 6 12 13 22 6' })
+    );
+
+    const TelegramIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M21 4 3 11l6 2.2M21 4l-3.5 16-8.5-6.8M21 4 9.5 13.4' })
+    );
+
+    const SendIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('line', { x1: 21, y1: 3, x2: 10, y2: 14 }),
+      React.createElement('polygon', { points: '21 3 14 21 10 14 3 10 21 3' })
+    );
+
+    const WarningIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M12 3 22 20H2Z' }),
+      React.createElement('line', { x1: 12, y1: 9.5, x2: 12, y2: 14 }),
+      React.createElement('circle', { cx: 12, cy: 17, r: 0.9, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const InfoIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 12, r: 9 }),
+      React.createElement('line', { x1: 12, y1: 11, x2: 12, y2: 16 }),
+      React.createElement('circle', { cx: 12, cy: 7.5, r: 0.9, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const ErrorIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 12, r: 9 }),
+      React.createElement('line', { x1: 12, y1: 8, x2: 12, y2: 13 }),
+      React.createElement('circle', { cx: 12, cy: 16.5, r: 0.9, fill: 'currentColor', stroke: 'none' })
+    );
+
+    const VerifiedIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M12 2 14.5 4.5 18 4l.5 3.5L21.5 9 20 12l1.5 3-3.5.5-.5 3.5-3.5-.5L12 21l-2.5-2.5-3.5.5-.5-3.5L2 15l1.5-3L2 9l3.5-1.5L6 4l3.5.5Z' }),
+      React.createElement('polyline', { points: '8.5 12.5 11 15 16 9' })
+    );
+
+    const FlagIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M5 21V4' }),
+      React.createElement('path', { d: 'M5 4h13l-3 4 3 4H5' })
+    );
+
+    const ScheduleIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 12, cy: 12, r: 9 }),
+      React.createElement('polyline', { points: '12 7 12 12 15.5 14' })
+    );
+
+    const GroupsIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('circle', { cx: 8.5, cy: 8, r: 3 }),
+      React.createElement('path', { d: 'M2.5 20c0-3.3 2.7-6 6-6s6 2.7 6 6' }),
+      React.createElement('circle', { cx: 17, cy: 8.5, r: 2.5 }),
+      React.createElement('path', { d: 'M15.5 14.2A5.5 5.5 0 0 1 21.5 19.5' })
+    );
+
+    const ChatIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M4 4h16v12H8l-4 4Z' })
+    );
+
+    const ListAltIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }),
+      React.createElement('line', { x1: 8, y1: 8, x2: 17, y2: 8 }),
+      React.createElement('line', { x1: 8, y1: 12, x2: 17, y2: 12 }),
+      React.createElement('line', { x1: 8, y1: 16, x2: 13, y2: 16 }),
+      React.createElement('line', { x1: 6, y1: 8, x2: 6.01, y2: 8 }),
+      React.createElement('line', { x1: 6, y1: 12, x2: 6.01, y2: 12 }),
+      React.createElement('line', { x1: 6, y1: 16, x2: 6.01, y2: 16 })
+    );
+
+    const VisibilityIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z' }),
+      React.createElement('circle', { cx: 12, cy: 12, r: 3 })
+    );
+
+    const VisibilityOffIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('path', { d: 'M9.9 5.1A10.9 10.9 0 0 1 12 5c7 0 10.5 7 10.5 7a13.5 13.5 0 0 1-3.1 4.1M6.6 6.6C3.5 8.5 1.5 12 1.5 12s3.5 7 10.5 7a10.6 10.6 0 0 0 4.4-.9' }),
+      React.createElement('path', { d: 'M9.5 9.8A3 3 0 0 0 14.2 14.4' }),
+      React.createElement('line', { x1: 2, y1: 2, x2: 22, y2: 22 })
+    );
+
+    const LockIcon = (props) => React.createElement(LucideIcon, props,
+      React.createElement('rect', { x: 4, y: 10.5, width: 16, height: 10, rx: 2 }),
+      React.createElement('path', { d: 'M7.5 10.5V7a4.5 4.5 0 0 1 9 0v3.5' })
+    );
+
 
     const COLORS = {
-      primary: '#6C5CE7',
-      primaryLight: '#A29BFE',
-      primaryDark: '#4A3DBF',
-      secondary: '#00CEC9',
-      accent: '#FD79A8',
-      success: '#00B894',
-      warning: '#FDCB6E',
-      error: '#E17055',
-      info: '#74B9FF',
-      gradient: 'linear-gradient(135deg, #6C5CE7 0%, #A29BFE 100%)',
-      gradientWarm: 'linear-gradient(135deg, #FD79A8 0%, #FDCB6E 100%)',
+      primary: '#5B5FEF',
+      primaryLight: '#8B8FF5',
+      primaryDark: '#4338CA',
+      secondary: '#7C3AED',
+      aiAccent: '#7C3AED',
+      accent: '#7C3AED',
+      success: '#22C55E',
+      warning: '#F59E0B',
+      error: '#EF4444',
+      info: '#3B82F6',
+      bg: '#F7F8FC',
+      gradient: 'linear-gradient(135deg, #5B5FEF 0%, #7C3AED 100%)',
+      gradientWarm: 'linear-gradient(135deg, #7C3AED 0%, #5B5FEF 100%)',
     };
 
     const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -992,7 +1281,7 @@
     const authLog = (label, payload) => {
       if (!__DEV__) return;
       try {
-        console.log('%c[Auth] ' + label, 'color:#6C5CE7;font-weight:600;', payload !== undefined ? payload : '');
+        console.log('%c[Auth] ' + label, 'color:#5B5FEF;font-weight:600;', payload !== undefined ? payload : '');
       } catch (e) {}
     };
 
@@ -1326,10 +1615,11 @@
       settings: {
         language: 'en-US',
         aiModel: 'gemini-flash',
-        geminiApiKey: '',
-        supabaseUrl: '',
-        supabaseAnonKey: '',
+        geminiApiKey: 'AQ.Ab8RN6IFz8E4mgqHW7gMHoBpEGN76h6ef3mCWdqsScVo2p6uDg',
+        supabaseUrl: 'https://quemdexciitxrmtbicae.supabase.co',
+        supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1ZW1kZXhjaWl0eHJtdGJpY2FlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4NzQ3NDcsImV4cCI6MjA5OTQ1MDc0N30.NNePZH__2lN9vx5RtnLFvL8rWMn6ifP2HiPfe6Kh2eE',
         storageBucket: 'zynasty.storage',
+        developerMode: true,
       },
     };
 
@@ -1374,7 +1664,15 @@
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
-            dispatch({ type: 'SET_SETTINGS', payload: parsed });
+            // Only apply keys that actually have a non-empty saved value -
+            // this prevents a stale/blank save from an earlier session
+            // (e.g. before credentials were configured) from wiping out
+            // the built-in defaults in initialState.settings above.
+            const nonEmpty = {};
+            Object.keys(parsed).forEach((key) => {
+              if (parsed[key] !== '' && parsed[key] != null) nonEmpty[key] = parsed[key];
+            });
+            dispatch({ type: 'SET_SETTINGS', payload: nonEmpty });
           } catch (e) {}
         }
         if (isMounted) setSettingsLoaded(true);
@@ -1860,8 +2158,8 @@
           ),
           React.createElement(
             Typography, { variant: 'h6', fontWeight: 700, sx: { letterSpacing: '-0.5px' } },
-            'AI Meeting',
-            React.createElement(Typography, { component: 'span', fontWeight: 400, color: 'text.secondary', sx: { display: 'block', fontSize: '0.75rem' } }, 'Assistant')
+            'Meeting Room',
+            React.createElement(Typography, { component: 'span', fontWeight: 400, color: 'text.secondary', sx: { display: 'block', fontSize: '0.75rem' } }, 'AI Assistant')
           )
         ),
         React.createElement(
@@ -2053,114 +2351,145 @@
       const stats = useMemo(() => {
         const total = meetings.length;
         const totalHours = meetings.reduce((acc, m) => acc + (m.duration || 0), 0) / 3600;
-        const thisWeek = meetings.filter(m => {
-          const d = new Date(m.date);
-          const now = new Date();
-          const weekStart = new Date(now);
-          weekStart.setDate(now.getDate() - now.getDay());
-          return d >= weekStart;
-        }).length;
+        const summaries = meetings.filter(m => m.summary && (m.summary.executiveSummary || (m.summary.keyPoints || []).length)).length;
         const pending = meetings.reduce((acc, m) => acc + (m.actionItems?.filter(a => !a.completed)?.length || 0), 0);
-        return { total, totalHours: totalHours.toFixed(1), thisWeek, pending };
+        const followUps = meetings.reduce((acc, m) => acc + ((m.summary && m.summary.followUpAgenda) ? m.summary.followUpAgenda.length : 0), 0);
+        return { total, totalHours: totalHours.toFixed(1), summaries, pending, followUps };
       }, [meetings]);
 
       const recent = meetings.slice(0, 5);
+      const hour = new Date().getHours();
+      const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 
       const statCards = [
-        { label: 'Total Meetings', value: stats.total, icon: React.createElement(MeetingRoomIcon), color: '#6C5CE7' },
-        { label: 'Recording Hours', value: `${stats.totalHours}h`, icon: React.createElement(TimerIcon), color: '#00CEC9' },
-        { label: 'This Week', value: stats.thisWeek, icon: React.createElement(TodayIcon), color: '#FDCB6E' },
-        { label: 'Pending Actions', value: stats.pending, icon: React.createElement(ChecklistIcon), color: '#E17055' },
+        { label: 'Total Meetings', value: stats.total, icon: React.createElement(MeetingRoomIcon), color: COLORS.primary },
+        { label: 'Recording Hours', value: `${stats.totalHours}h`, icon: React.createElement(TimerIcon), color: COLORS.aiAccent },
+        { label: 'AI Summaries', value: stats.summaries, icon: React.createElement(AutoAwesomeIcon), color: COLORS.info },
+        { label: 'Pending Tasks', value: stats.pending, icon: React.createElement(ChecklistIcon), color: COLORS.warning },
+        { label: 'Follow-ups', value: stats.followUps, icon: React.createElement(SendIcon), color: COLORS.success },
       ];
 
       return React.createElement(
         Box, { className: 'fade-in-up' },
+
+        // --- Hero ---
         React.createElement(
-          Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px', mb: 1 } },
-          'Dashboard'
+          Box, {
+            sx: {
+              position: 'relative',
+              overflow: 'hidden',
+              borderRadius: '24px',
+              background: COLORS.gradient,
+              p: { xs: 3, sm: 5 },
+              mb: 3,
+              color: '#fff',
+            }
+          },
+          React.createElement(Box, {
+            sx: {
+              position: 'absolute', top: -60, right: -60, width: 220, height: 220, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.10)',
+            }
+          }),
+          React.createElement(Box, {
+            sx: {
+              position: 'absolute', bottom: -80, right: 120, width: 180, height: 180, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.07)',
+            }
+          }),
+          React.createElement(
+            Typography, { variant: 'body1', sx: { opacity: 0.85, fontWeight: 600, mb: 0.5, position: 'relative' } },
+            `\uD83D\uDC4B ${greeting}`
+          ),
+          React.createElement(
+            Typography, { variant: 'h3', fontWeight: 800, sx: { letterSpacing: '-0.02em', mb: 0.5, position: 'relative' } },
+            'Meeting Room AI'
+          ),
+          React.createElement(
+            Typography, { variant: 'body1', sx: { opacity: 0.9, mb: 3, position: 'relative', maxWidth: 480 } },
+            'Your intelligent meeting assistant — record, transcribe, and get AI-powered summaries in minutes.'
+          ),
+          React.createElement(
+            Button, {
+              variant: 'contained',
+              size: 'large',
+              startIcon: React.createElement(MicIcon),
+              onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'new' }); },
+              sx: {
+                position: 'relative',
+                bgcolor: '#fff',
+                color: COLORS.primary,
+                borderRadius: '14px',
+                px: 3.5,
+                py: 1.3,
+                fontWeight: 700,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+                '&:hover': { bgcolor: '#fff', opacity: 0.92, boxShadow: '0 10px 28px rgba(0,0,0,0.22)' },
+              }
+            },
+            'Start New Meeting'
+          )
         ),
-        React.createElement(
-          Typography, { variant: 'body2', color: 'text.secondary', sx: { mb: 3 } },
-          `Welcome back! You have ${stats.total} meetings recorded.`
-        ),
+
+        // --- Stat cards ---
         React.createElement(
           Grid, { container: true, spacing: 2, sx: { mb: 3 } },
           statCards.map((stat, i) =>
             React.createElement(
-              Grid, { key: i, size: { xs: 6, sm: 6, md: 3 } },
+              Grid, { key: i, size: { xs: 6, sm: 4, md: 2.4 } },
               React.createElement(
                 Card, {
                   sx: {
-                    p: 2,
-                    borderRadius: '16px',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                    border: '1px solid',
-                    borderColor: 'divider',
+                    p: 2.25,
                     height: '100%',
+                    '&:hover': { boxShadow: '0 4px 20px rgba(20,20,43,0.08)', transform: 'translateY(-2px)' },
                   }
                 },
                 React.createElement(
-                  Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 } },
-                  React.createElement(
-                    Typography, { variant: 'caption', color: 'text.secondary', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' },
-                    stat.label
-                  ),
-                  React.createElement(
-                    Box, {
-                      sx: {
-                        width: 36,
-                        height: 36,
-                        borderRadius: '10px',
-                        background: alpha(stat.color, 0.12),
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }
-                    },
-                    React.cloneElement(stat.icon, { sx: { fontSize: 20, color: stat.color } })
-                  )
+                  Box, {
+                    sx: {
+                      width: 38, height: 38, borderRadius: '12px',
+                      background: alpha(stat.color, 0.12),
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1.5,
+                    }
+                  },
+                  React.cloneElement(stat.icon, { sx: { fontSize: 20, color: stat.color } })
                 ),
+                React.createElement(Typography, { variant: 'h4', fontWeight: 800, sx: { letterSpacing: '-0.02em', lineHeight: 1.1 } }, stat.value),
                 React.createElement(
-                  Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px' } },
-                  stat.value
+                  Typography, { variant: 'caption', color: 'text.secondary', fontWeight: 600, sx: { display: 'block', mt: 0.5 } },
+                  stat.label
                 )
               )
             )
           )
         ),
+
+        // --- Recent meetings ---
         React.createElement(
-          Card, {
-            sx: {
-              borderRadius: '16px',
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-            }
-          },
+          Card, null,
           React.createElement(
             CardContent, { sx: { p: 3 } },
             React.createElement(
               Box, { sx: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 } },
-              React.createElement(
-                Typography, { variant: 'h6', fontWeight: 600 },
-                'Recent Meetings'
-              ),
-              React.createElement(
+              React.createElement(Typography, { variant: 'h6', fontWeight: 700 }, 'Recent Meetings'),
+              recent.length > 0 && React.createElement(
                 Button, { size: 'small', onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'history' }); } },
                 'View All'
               )
             ),
             recent.length === 0 ?
             React.createElement(
-              Box, { sx: { py: 4, textAlign: 'center' } },
+              Box, { sx: { py: 6, textAlign: 'center' } },
+              React.createElement(Typography, { sx: { fontSize: 40, mb: 1 } }, '\u2728'),
+              React.createElement(Typography, { variant: 'subtitle1', fontWeight: 700, sx: { mb: 0.5 } }, 'No meetings yet'),
               React.createElement(
-                Typography, { variant: 'body2', color: 'text.secondary' },
-                'No meetings recorded yet. Start your first meeting!'
+                Typography, { variant: 'body2', color: 'text.secondary', sx: { mb: 2.5 } },
+                'Start your first AI-powered meeting to see summaries and action items appear here.'
               ),
               React.createElement(
                 Button, {
                   variant: 'contained',
-                  sx: { mt: 2, borderRadius: '12px' },
                   startIcon: React.createElement(MicIcon),
                   onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'new' }); }
                 },
@@ -2169,21 +2498,24 @@
             ) :
             React.createElement(
               Stack, { spacing: 1.5 },
-              recent.map((meeting) =>
-                React.createElement(
+              recent.map((meeting) => {
+                const hasSummary = !!(meeting.summary && (meeting.summary.executiveSummary || (meeting.summary.keyPoints || []).length));
+                const pendingCount = (meeting.actionItems || []).filter(a => !a.completed).length;
+                return React.createElement(
                   Box, {
                     key: meeting.id,
                     className: 'meeting-card',
                     sx: {
                       p: 2,
-                      borderRadius: '12px',
+                      borderRadius: '16px',
                       border: '1px solid',
                       borderColor: 'divider',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
+                      gap: 1.5,
                       transition: 'all 0.2s ease',
-                      '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.03), borderColor: 'primary.main' },
+                      '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.04), borderColor: 'primary.main', transform: 'translateY(-1px)' },
                       cursor: 'pointer',
                     },
                     onClick: () => {
@@ -2192,65 +2524,67 @@
                     }
                   },
                   React.createElement(
-                    Box, { sx: { display: 'flex', alignItems: 'center', gap: 2 } },
+                    Box, { sx: { display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 } },
                     React.createElement(
                       Box, {
                         sx: {
-                          width: 40,
-                          height: 40,
-                          borderRadius: '10px',
-                          background: alpha(COLORS.primary, 0.1),
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          width: 42, height: 42, borderRadius: '12px', flexShrink: 0,
+                          background: COLORS.gradient,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }
                       },
-                      React.createElement(DescriptionIcon, { sx: { color: COLORS.primary, fontSize: 20 } })
+                      React.createElement(DescriptionIcon, { sx: { color: '#fff', fontSize: 20 } })
                     ),
                     React.createElement(
                       Box, { sx: { minWidth: 0 } },
                       React.createElement(
-                        Typography, { variant: 'body1', fontWeight: 600, noWrap: true, sx: { maxWidth: 200 } },
+                        Typography, { variant: 'body1', fontWeight: 700, noWrap: true, sx: { maxWidth: 260 } },
                         meeting.title || 'Untitled Meeting'
                       ),
                       React.createElement(
                         Typography, { variant: 'caption', color: 'text.secondary', display: 'block' },
-                        `${formatDate(meeting.date)} · ${formatTime12(meeting.date)} · ${formatTime(meeting.duration || 0)}`
+                        `${formatDate(meeting.date)} \u00b7 ${formatTime12(meeting.date)} \u00b7 ${formatTime(meeting.duration || 0)}`
                       )
                     )
                   ),
                   React.createElement(
-                    Box, { sx: { display: 'flex', alignItems: 'center', gap: 1 } },
-                    (meeting.tags || []).slice(0, 2).map((tag) =>
+                    Box, { sx: { display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 } },
+                    (meeting.tags || []).slice(0, 1).map((tag) =>
                       React.createElement(Chip, {
-                        key: tag,
-                        label: tag,
-                        size: 'small',
-                        sx: { height: 20, fontSize: '0.65rem', borderRadius: '6px' }
+                        key: tag, label: tag, size: 'small',
+                        sx: { height: 22, fontSize: '0.68rem', display: { xs: 'none', sm: 'inline-flex' } }
                       })
                     ),
-                    React.createElement(
-                      IconButton, { size: 'small' },
-                      React.createElement(MoreVertIcon, { fontSize: 'small' })
-                    )
+                    hasSummary && React.createElement(Chip, {
+                      icon: React.createElement(AutoAwesomeIcon, { sx: { fontSize: 14 } }),
+                      label: 'Summary Ready', size: 'small', color: 'success', variant: 'outlined',
+                      sx: { height: 22, fontSize: '0.65rem', display: { xs: 'none', md: 'inline-flex' } }
+                    }),
+                    pendingCount > 0 && React.createElement(Chip, {
+                      label: `${pendingCount} task${pendingCount > 1 ? 's' : ''}`, size: 'small',
+                      sx: { height: 22, fontSize: '0.65rem', bgcolor: alpha(COLORS.warning, 0.15), color: '#B45309' }
+                    })
                   )
-                )
-              )
+                );
+              })
             )
           )
         ),
+
         React.createElement(
           Fab, {
             className: 'fab-record',
-            color: 'error',
             sx: {
               position: 'fixed',
               bottom: 32,
               right: 32,
               width: 64,
               height: 64,
-              boxShadow: '0 8px 32px rgba(239,68,68,0.35)',
+              background: COLORS.gradient,
+              color: '#fff',
+              boxShadow: '0 10px 32px rgba(91,95,239,0.4)',
               zIndex: 1000,
+              '&:hover': { background: COLORS.gradient, opacity: 0.92 },
             },
             onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'new' }); }
           },
@@ -2278,6 +2612,7 @@
       const [showSummary, setShowSummary] = useState(false);
       const [audioBlob, setAudioBlob] = useState(null);
       const [isSaving, setIsSaving] = useState(false);
+      const [processingStepIndex, setProcessingStepIndex] = useState(0);
 
       const recordingService = useRef(null);
       const transcriptionService = useRef(null);
@@ -2338,6 +2673,21 @@
           }
         };
       }, []);
+
+      // Purely cosmetic: cycles the highlighted sub-step within the current
+      // phase of the AI processing workflow panel below. Does not affect
+      // any business logic - status/isGenerating remain the source of truth.
+      useEffect(() => {
+        if (status !== 'processing' && !isGenerating) {
+          setProcessingStepIndex(0);
+          return;
+        }
+        const phaseLength = status === 'processing' ? 2 : 3;
+        const interval = setInterval(() => {
+          setProcessingStepIndex(i => (i + 1) % phaseLength);
+        }, 1300);
+        return () => clearInterval(interval);
+      }, [status, isGenerating]);
 
       const startRecording = async () => {
         try {
@@ -2598,131 +2948,264 @@
         React.createElement(
           Card, {
             sx: {
-              borderRadius: '16px',
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
               mb: 3,
-              overflow: 'visible',
+              overflow: 'hidden',
               position: 'relative',
+              background: isRecording
+                ? 'linear-gradient(180deg, rgba(239,68,68,0.06) 0%, rgba(255,255,255,0) 60%)'
+                : isDone
+                ? 'linear-gradient(180deg, rgba(34,197,94,0.06) 0%, rgba(255,255,255,0) 60%)'
+                : 'linear-gradient(180deg, rgba(91,95,239,0.05) 0%, rgba(255,255,255,0) 60%)',
+            }
+          },
+          React.createElement(
+            CardContent, { sx: { p: { xs: 3, sm: 5 }, textAlign: 'center' } },
+
+            // --- Big glowing mic ---
+            React.createElement(
+              Box, { sx: { position: 'relative', width: 128, height: 128, mx: 'auto', mb: 2.5 } },
+              (isRecording || isPaused) && React.createElement(
+                Box, {
+                  sx: {
+                    position: 'absolute', inset: 0, borderRadius: '50%',
+                    border: '2px solid', borderColor: isPaused ? 'warning.main' : 'error.main',
+                    animation: isRecording ? 'pulse-ring 1.8s ease-out infinite' : 'none',
+                  }
+                }
+              ),
+              React.createElement(
+                IconButton, {
+                  sx: {
+                    width: 96, height: 96,
+                    position: 'absolute', top: 16, left: 16,
+                    background: isRecording ? '#EF4444' : isPaused ? '#F59E0B' : COLORS.gradient,
+                    color: '#fff',
+                    '&:hover': { background: isRecording ? '#EF4444' : isPaused ? '#F59E0B' : COLORS.gradient, opacity: 0.92 },
+                    boxShadow: isRecording
+                      ? '0 8px 32px rgba(239,68,68,0.35)'
+                      : isPaused ? '0 8px 32px rgba(245,158,11,0.3)' : '0 8px 32px rgba(91,95,239,0.35)',
+                    animation: isRecording ? 'micGlow 2s ease-in-out infinite' : 'none',
+                    transition: 'background 0.2s ease',
+                  },
+                  onClick: () => {
+                    if (isIdle) startRecording();
+                    else if (isRecording) pauseRecording();
+                    else if (isPaused) resumeRecording();
+                  },
+                  disabled: isProcessing,
+                },
+                isIdle ? React.createElement(MicIcon, { sx: { fontSize: 40 } }) :
+                isRecording ? React.createElement(PauseIcon, { sx: { fontSize: 40 } }) :
+                isPaused ? React.createElement(PlayArrowIcon, { sx: { fontSize: 40 } }) :
+                isProcessing ? React.createElement(CircularProgress, { size: 32, sx: { color: '#fff' } }) :
+                React.createElement(CheckCircleIcon, { sx: { fontSize: 40 } })
+              )
+            ),
+
+            // --- Animated waveform (reflects live mic volume while recording) ---
+            React.createElement(
+              Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', height: 28, mb: 1.5 } },
+              Array.from({ length: 9 }).map((_, i) => {
+                const mid = 4;
+                const dist = Math.abs(i - mid);
+                const baseHeight = isRecording ? 8 + Math.max(0, (volume * 26) - dist * 4) : isPaused ? 10 : 6;
+                return React.createElement(Box, {
+                  key: i,
+                  sx: {
+                    width: 3.5,
+                    height: baseHeight,
+                    borderRadius: 4,
+                    background: isRecording ? COLORS.gradient : alpha(theme.palette.text.secondary, 0.25),
+                    transition: 'height 0.12s ease',
+                    animation: isRecording ? `waveBar ${0.7 + (i % 4) * 0.12}s ease-in-out infinite` : 'none',
+                    animationDelay: `${i * 0.05}s`,
+                    transformOrigin: 'center',
+                  }
+                });
+              })
+            ),
+
+            // --- Timer + state ---
+            React.createElement(
+              Typography, {
+                variant: 'h3', fontWeight: 800,
+                sx: { letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', mb: 0.5 }
+              },
+              formatTimeDisplay(duration)
+            ),
+            React.createElement(
+              Chip, {
+                size: 'small',
+                label: isRecording ? 'Recording' : isPaused ? 'Paused' : isProcessing ? 'Uploading & transcribing…' : isDone ? 'Recording complete' : 'Ready to record',
+                sx: {
+                  fontWeight: 700,
+                  bgcolor: isRecording ? alpha('#EF4444', 0.12) : isPaused ? alpha('#F59E0B', 0.12) : isDone ? alpha('#22C55E', 0.12) : alpha(theme.palette.primary.main, 0.1),
+                  color: isRecording ? '#DC2626' : isPaused ? '#B45309' : isDone ? '#16A34A' : theme.palette.primary.main,
+                  mb: 3,
+                }
+              }
+            ),
+
+            // --- Pre-recording setup fields ---
+            isIdle && React.createElement(
+              Box, { sx: { maxWidth: 420, mx: 'auto', mb: 1 } },
+              React.createElement(TextField, {
+                fullWidth: true, size: 'small', label: 'Meeting title (optional)',
+                placeholder: 'e.g. Q4 Roadmap Review',
+                value: meetingTitle,
+                onChange: (e) => setMeetingTitle(e.target.value),
+              })
+            ),
+
+            // --- Controls ---
+            React.createElement(
+              Box, { sx: { display: 'flex', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap' } },
+              isIdle && React.createElement(
+                Button, {
+                  variant: 'contained', size: 'large', startIcon: React.createElement(MicIcon),
+                  onClick: startRecording,
+                  sx: { px: 4, py: 1.2, background: COLORS.gradient, '&:hover': { background: COLORS.gradient, opacity: 0.92 } }
+                },
+                'Start Recording'
+              ),
+              isRecording && React.createElement(
+                Button, { variant: 'outlined', startIcon: React.createElement(PauseIcon), onClick: pauseRecording },
+                'Pause'
+              ),
+              isPaused && React.createElement(
+                Button, { variant: 'contained', startIcon: React.createElement(PlayArrowIcon), onClick: resumeRecording },
+                'Resume'
+              ),
+              (isRecording || isPaused) && React.createElement(
+                Button, { variant: 'outlined', color: 'error', startIcon: React.createElement(StopIcon), onClick: stopRecording },
+                'Stop'
+              )
+            ),
+
+            // --- Live volume readout while recording/paused ---
+            (isRecording || isPaused) && React.createElement(
+              Box, { sx: { maxWidth: 260, mx: 'auto', mt: 3 } },
+              React.createElement(
+                LinearProgress, {
+                  variant: 'determinate',
+                  value: volume * 100,
+                  sx: {
+                    height: 4, borderRadius: 4,
+                    bgcolor: alpha(theme.palette.primary.main, 0.12),
+                    '& .MuiLinearProgress-bar': {
+                      bgcolor: volume > 0.6 ? 'success.main' : volume > 0.3 ? 'warning.main' : 'primary.main',
+                    }
+                  }
+                }
+              ),
+              React.createElement(
+                Typography, { variant: 'caption', color: 'text.secondary', sx: { display: 'block', mt: 0.5 } },
+                `Input level · ${Math.round(volume * 100)}%`
+              )
+            )
+          )
+        ),
+
+
+        // --- AI Processing workflow ---
+        (isProcessing || isGenerating) && React.createElement(
+          Card, { sx: { mb: 3, overflow: 'hidden' } },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', alignItems: 'center', gap: 1.5, mb: 2.5 } },
+              React.createElement(
+                Box, {
+                  sx: {
+                    width: 32, height: 32, borderRadius: '9px', background: COLORS.gradient,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    animation: 'spin 2.5s linear infinite',
+                  }
+                },
+                React.createElement(AutoAwesomeIcon, { sx: { fontSize: 16, color: '#fff' } })
+              ),
+              React.createElement(Typography, { variant: 'subtitle1', fontWeight: 700 }, 'AI is working on your meeting')
+            ),
+            React.createElement(
+              Stack, { spacing: 0 },
+              [
+                { label: 'Uploading audio', phase: 'processing', idx: 0 },
+                { label: 'Speech recognition', phase: 'processing', idx: 1 },
+                { label: 'Understanding context', phase: 'generating', idx: 0 },
+                { label: 'Generating summary', phase: 'generating', idx: 1 },
+                { label: 'Creating action items', phase: 'generating', idx: 2 },
+              ].map((step, i, arr) => {
+                const phaseOrder = { processing: 0, generating: 1 };
+                const currentPhase = isProcessing ? 'processing' : 'generating';
+                const currentOrder = phaseOrder[currentPhase];
+                const stepOrder = phaseOrder[step.phase];
+                const isPast = stepOrder < currentOrder;
+                const isActivePhase = stepOrder === currentOrder;
+                const isActiveStep = isActivePhase && step.idx === processingStepIndex;
+                const isComplete = isPast;
+                return React.createElement(
+                  Box, {
+                    key: i,
+                    sx: { display: 'flex', alignItems: 'center', gap: 1.5, py: 1 }
+                  },
+                  React.createElement(
+                    Box, {
+                      sx: {
+                        width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        bgcolor: isComplete ? alpha(COLORS.success, 0.15) : isActiveStep ? alpha(COLORS.primary, 0.15) : alpha(theme.palette.text.secondary, 0.08),
+                      }
+                    },
+                    isComplete
+                      ? React.createElement(CheckCircleIcon, { sx: { fontSize: 15, color: COLORS.success } })
+                      : isActiveStep
+                      ? React.createElement(CircularProgress, { size: 12, thickness: 6, sx: { color: COLORS.primary } })
+                      : React.createElement(Box, { sx: { width: 6, height: 6, borderRadius: '50%', bgcolor: alpha(theme.palette.text.secondary, 0.35) } })
+                  ),
+                  React.createElement(
+                    Typography, {
+                      variant: 'body2',
+                      fontWeight: isActiveStep ? 700 : 500,
+                      color: isComplete ? 'text.primary' : isActiveStep ? 'text.primary' : 'text.secondary',
+                    },
+                    step.label
+                  )
+                );
+              })
+            )
+          )
+        ),
+
+        // --- AI Processing completion summary (shown once generatedSummary lands) ---
+        (generatedSummary && showSummary) && React.createElement(
+          Card, {
+            sx: {
+              mb: 3,
+              background: alpha(COLORS.success, 0.05),
+              borderColor: alpha(COLORS.success, 0.25),
             }
           },
           React.createElement(
             CardContent, { sx: { p: 3 } },
             React.createElement(
-              Box, { sx: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3 } },
-              React.createElement(
-                Box, { sx: { display: 'flex', alignItems: 'center', gap: 2 } },
-                React.createElement(
-                  Box, {
-                    sx: {
-                      position: 'relative',
-                      width: 56,
-                      height: 56,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }
-                  },
-                  (isRecording || isPaused) && React.createElement(
-                    Box, {
-                      sx: {
-                        position: 'absolute',
-                        inset: -4,
-                        borderRadius: '50%',
-                        border: '2px solid',
-                        borderColor: isPaused ? 'warning.main' : 'error.main',
-                        animation: isRecording ? 'pulse-ring 1.8s ease-out infinite' : 'none',
-                      }
-                    }
-                  ),
-                  React.createElement(
-                    IconButton, {
-                      sx: {
-                        width: 56,
-                        height: 56,
-                        bgcolor: isRecording ? 'error.main' : isPaused ? 'warning.main' : 'primary.main',
-                        color: '#fff',
-                        '&:hover': { bgcolor: isRecording ? 'error.dark' : isPaused ? 'warning.dark' : 'primary.dark' },
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-                      },
-                      onClick: () => {
-                        if (isIdle) startRecording();
-                        else if (isRecording) pauseRecording();
-                        else if (isPaused) resumeRecording();
-                      }
-                    },
-                    isIdle ? React.createElement(MicIcon, { sx: { fontSize: 28 } }) :
-                    isRecording ? React.createElement(PauseIcon, { sx: { fontSize: 28 } }) :
-                    React.createElement(PlayArrowIcon, { sx: { fontSize: 28 } })
-                  )
-                ),
-                React.createElement(
-                  Box, { sx: { minWidth: 80 } },
-                  React.createElement(
-                    Typography, { variant: 'h5', fontWeight: 700, sx: { letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' } },
-                    formatTimeDisplay(duration)
-                  ),
-                  React.createElement(
-                    Typography, { variant: 'caption', color: 'text.secondary' },
-                    isRecording ? '● Recording' : isPaused ? '⏸ Paused' : isProcessing ? '⏳ Processing...' : isDone ? '✅ Done' : 'Ready'
-                  )
-                )
-              ),
-              (isRecording || isPaused) && React.createElement(
-                Box, { sx: { flex: 1, minWidth: 100, maxWidth: 200 } },
-                React.createElement(
-                  LinearProgress, {
-                    variant: 'determinate',
-                    value: volume * 100,
-                    sx: {
-                      height: 4,
-                      borderRadius: 4,
-                      bgcolor: alpha(theme.palette.primary.main, 0.12),
-                      '& .MuiLinearProgress-bar': {
-                        bgcolor: volume > 0.6 ? 'success.main' : volume > 0.3 ? 'warning.main' : 'primary.main',
-                      }
-                    }
-                  }
-                ),
-                React.createElement(
-                  Box, { sx: { display: 'flex', justifyContent: 'space-between', mt: 0.5 } },
-                  React.createElement(
-                    Typography, { variant: 'caption', color: 'text.secondary', sx: { fontSize: '0.6rem' } },
-                    'Volume'
-                  ),
-                  React.createElement(
-                    Typography, { variant: 'caption', color: 'text.secondary', sx: { fontSize: '0.6rem' } },
-                    `${Math.round(volume * 100)}%`
-                  )
-                )
-              ),
-              (isRecording || isPaused) && React.createElement(
-                Button, {
-                  variant: 'outlined',
-                  color: 'error',
-                  sx: { borderRadius: '12px' },
-                  startIcon: React.createElement(StopIcon),
-                  onClick: stopRecording,
-                },
-                'Stop'
-              ),
-              isDone && React.createElement(
-                Chip, {
-                  label: 'Recording Complete',
-                  color: 'success',
-                  icon: React.createElement(CheckCircleIcon),
-                  sx: { borderRadius: '8px' }
-                }
-              ),
-              isProcessing && React.createElement(
-                Chip, {
-                  label: 'Processing...',
-                  color: 'info',
-                  icon: React.createElement(CircularProgress, { size: 14, sx: { color: 'inherit' } }),
-                  sx: { borderRadius: '8px' }
-                }
-              )
+              Box, { sx: { display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 } },
+              React.createElement(Typography, { sx: { fontSize: 22 } }, '\uD83E\uDDE0'),
+              React.createElement(Typography, { variant: 'subtitle1', fontWeight: 700 }, 'Meeting analyzed successfully')
+            ),
+            React.createElement(
+              Stack, { direction: 'row', spacing: 1, flexWrap: 'wrap', useFlexGap: true },
+              (generatedSummary.actionItems || []).length > 0 && React.createElement(Chip, {
+                size: 'small', color: 'success', variant: 'outlined',
+                label: `${generatedSummary.actionItems.length} action item${generatedSummary.actionItems.length > 1 ? 's' : ''} detected`
+              }),
+              (generatedSummary.followUpAgenda || []).length > 0 && React.createElement(Chip, {
+                size: 'small', color: 'info', variant: 'outlined',
+                label: `${generatedSummary.followUpAgenda.length} follow-up${generatedSummary.followUpAgenda.length > 1 ? 's' : ''} suggested`
+              }),
+              (generatedSummary.risks || []).length > 0 && React.createElement(Chip, {
+                size: 'small', color: 'warning', variant: 'outlined',
+                label: `${generatedSummary.risks.length} risk${generatedSummary.risks.length > 1 ? 's' : ''} found`
+              })
             )
           )
         ),
@@ -3091,28 +3574,28 @@
 
         filtered.length === 0 ?
         React.createElement(
-          Card, {
-            sx: {
-              borderRadius: '16px',
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-              p: 4,
-              textAlign: 'center'
-            }
-          },
+          Card, { sx: { p: 5, textAlign: 'center' } },
+          React.createElement(Typography, { sx: { fontSize: 40, mb: 1 } }, meetings.length === 0 ? '\u2728' : '\uD83D\uDD0D'),
           React.createElement(
-            Typography, { variant: 'body1', color: 'text.secondary' },
-            'No meetings found. Start recording your first meeting!'
+            Typography, { variant: 'subtitle1', fontWeight: 700, sx: { mb: 0.5 } },
+            meetings.length === 0 ? 'No meetings yet' : 'No meetings match your filters'
           ),
           React.createElement(
+            Typography, { variant: 'body2', color: 'text.secondary', sx: { mb: 2.5 } },
+            meetings.length === 0
+              ? 'Start your first AI-powered meeting to see it appear here.'
+              : 'Try a different search term or clear your filters.'
+          ),
+          meetings.length === 0 ? React.createElement(
             Button, {
               variant: 'contained',
-              sx: { mt: 2, borderRadius: '12px' },
               startIcon: React.createElement(MicIcon),
               onClick: () => { dispatch({ type: 'SET_VIEW', payload: 'new' }); }
             },
             'Start Recording'
+          ) : React.createElement(
+            Button, { variant: 'outlined', onClick: () => { setSearchTerm(''); setFilterDate(''); setFilterTags([]); } },
+            'Clear filters'
           )
         ) :
         React.createElement(
@@ -3123,12 +3606,8 @@
                 key: meeting.id,
                 className: 'meeting-card',
                 sx: {
-                  borderRadius: '12px',
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                   transition: 'all 0.2s ease',
-                  '&:hover': { boxShadow: '0 4px 12px rgba(0,0,0,0.06)' },
+                  '&:hover': { boxShadow: '0 6px 24px rgba(20,20,43,0.08)', transform: 'translateY(-2px)', borderColor: alpha(COLORS.primary, 0.3) },
                   cursor: 'pointer',
                 },
                 onClick: () => {
@@ -3297,14 +3776,24 @@
               React.createElement(ArrowBackIcon)
             ),
             React.createElement(
+              Box, {
+                sx: {
+                  width: 44, height: 44, borderRadius: '13px', flexShrink: 0,
+                  background: COLORS.gradient, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  display: { xs: 'none', sm: 'flex' },
+                }
+              },
+              React.createElement(DescriptionIcon, { sx: { color: '#fff', fontSize: 22 } })
+            ),
+            React.createElement(
               Box, { sx: { minWidth: 0 } },
               React.createElement(
-                Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px', wordBreak: 'break-word' } },
+                Typography, { variant: 'h4', fontWeight: 800, sx: { letterSpacing: '-0.02em', wordBreak: 'break-word' } },
                 meeting.title || 'Untitled Meeting'
               ),
               React.createElement(
                 Typography, { variant: 'caption', color: 'text.secondary' },
-                `${formatDateTime(meeting.date)} · ${formatTime(meeting.duration || 0)} · ${meeting.sentiment || 'Neutral'} sentiment`
+                `${formatDateTime(meeting.date)} \u00b7 ${formatTime(meeting.duration || 0)} \u00b7 ${meeting.sentiment || 'Neutral'} sentiment`
               )
             )
           ),
@@ -3315,7 +3804,6 @@
                 size: 'small',
                 variant: 'outlined',
                 startIcon: React.createElement(ShareIcon),
-                sx: { borderRadius: '10px' },
                 onClick: () => {
                   dispatch({
                     type: 'SET_SNACKBAR',
@@ -3330,7 +3818,6 @@
                 size: 'small',
                 variant: 'outlined',
                 startIcon: React.createElement(FileDownloadIcon),
-                sx: { borderRadius: '10px' },
                 onClick: () => {
                   const content =
                     `Meeting: ${meeting.title}\nDate: ${formatDateTime(meeting.date)}\nDuration: ${formatTime(meeting.duration || 0)}\n\nSummary:\n${summary.executiveSummary || 'N/A'}\n\nTranscript:\n${transcript.slice(0, 500)}...`;
@@ -3351,7 +3838,6 @@
                 color: 'error',
                 variant: 'outlined',
                 startIcon: React.createElement(DeleteIcon),
-                sx: { borderRadius: '10px' },
                 onClick: () => setShowDeleteDialog(true)
               },
               'Delete'
@@ -3367,26 +3853,22 @@
               label: tag,
               size: 'small',
               variant: 'outlined',
-              sx: { borderRadius: '6px', fontSize: '0.7rem' }
+              sx: { fontSize: '0.7rem' }
             })
           )
         ),
 
         meeting.audio_blob && React.createElement(
-          Card, {
-            sx: {
-              borderRadius: '16px',
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-              mb: 2,
-            }
-          },
+          Card, { sx: { mb: 2 } },
           React.createElement(
             CardContent, { sx: { p: 2 } },
             React.createElement(
-              Typography, { variant: 'subtitle2', fontWeight: 600, color: 'text.secondary', sx: { mb: 1 } },
-              'Audio Recording'
+              Box, { sx: { display: 'flex', alignItems: 'center', gap: 1, mb: 1 } },
+              React.createElement(PlayArrowIcon, { sx: { fontSize: 16, color: COLORS.primary } }),
+              React.createElement(
+                Typography, { variant: 'subtitle2', fontWeight: 700, color: 'text.secondary' },
+                'Audio Recording'
+              )
             ),
             React.createElement(
               'audio', {
@@ -3402,7 +3884,12 @@
           Tabs, {
             value: activeTab,
             onChange: (e, v) => setActiveTab(v),
-            sx: { mb: 3, borderBottom: '1px solid', borderColor: 'divider' },
+            sx: {
+              mb: 3,
+              minHeight: 40,
+              '& .MuiTabs-flexContainer': { gap: 0.5 },
+              '& .MuiTabs-indicator': { display: 'none' },
+            },
             variant: 'scrollable',
             scrollButtons: 'auto',
           },
@@ -3412,7 +3899,15 @@
               label: tab.label,
               icon: tab.icon,
               iconPosition: 'start',
-              sx: { minHeight: 48, fontWeight: 500 }
+              disableRipple: true,
+              sx: {
+                minHeight: 40,
+                fontWeight: 600,
+                borderRadius: '12px',
+                px: 2,
+                minWidth: 'auto',
+                '&.Mui-selected': { bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main' },
+              }
             })
           )
         ),
@@ -3962,6 +4457,12 @@
         }
       };
 
+      const suggestedTags = useMemo(() => {
+        const tags = new Set();
+        (state.meetings || []).forEach(m => (m.tags || []).forEach(t => tags.add(t)));
+        return Array.from(tags).slice(0, 10);
+      }, [state.meetings]);
+
       useEffect(() => {
         const timer = setTimeout(() => {
           if (query.trim()) handleSearch();
@@ -3970,44 +4471,57 @@
       }, [query]);
 
       return React.createElement(
-        Box, { className: 'fade-in-up' },
+        Box, { className: 'fade-in-up', sx: { maxWidth: 720, mx: 'auto' } },
         React.createElement(
-          Typography, { variant: 'h4', fontWeight: 700, sx: { letterSpacing: '-0.5px', mb: 3 } },
-          'Search Meetings'
+          Box, { sx: { textAlign: 'center', mb: 3 } },
+          React.createElement(Typography, { variant: 'h4', fontWeight: 800, sx: { letterSpacing: '-0.02em', mb: 0.5 } }, 'Search your meetings'),
+          React.createElement(Typography, { variant: 'body2', color: 'text.secondary' }, 'Find anything across titles, transcripts, tags, people, and companies.')
         ),
         React.createElement(
-          Card, {
-            sx: {
-              borderRadius: '16px',
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-              mb: 3,
-            }
-          },
+          Card, { sx: { mb: 3 } },
           React.createElement(
-            CardContent, { sx: { p: 3 } },
+            CardContent, { sx: { p: { xs: 2.5, sm: 3 } } },
             React.createElement(
               TextField, {
                 fullWidth: true,
-                placeholder: 'Search by title, transcript, tags, people, or companies...',
+                autoFocus: true,
+                placeholder: 'Search by title, transcript, tags, people, or companies…',
                 value: query,
                 onChange: (e) => setQuery(e.target.value),
                 variant: 'outlined',
+                size: 'medium',
                 InputProps: {
+                  sx: { borderRadius: '16px', fontSize: '1.05rem', py: 0.5 },
                   startAdornment: React.createElement(InputAdornment, { position: 'start' },
-                    React.createElement(SearchIcon)
+                    React.createElement(SearchIcon, { sx: { color: COLORS.primary } })
                   ),
                   endAdornment: query && React.createElement(
                     InputAdornment, { position: 'end' },
                     React.createElement(
-                      IconButton, { size: 'small', onClick: () => setQuery('') },
+                      IconButton, { size: 'small', onClick: () => { setQuery(''); setResults([]); setSearched(false); } },
                       React.createElement(CloseIcon)
                     )
                   )
                 },
-                sx: { mb: 2 }
+                sx: { mb: suggestedTags.length ? 2 : 0 }
               }
+            ),
+            !query && suggestedTags.length > 0 && React.createElement(
+              Box, null,
+              React.createElement(
+                Typography, { variant: 'caption', fontWeight: 700, color: 'text.secondary', sx: { display: 'block', mb: 1 } },
+                'SUGGESTED TAGS'
+              ),
+              React.createElement(
+                Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.75 } },
+                suggestedTags.map((tag) =>
+                  React.createElement(Chip, {
+                    key: tag, label: tag, size: 'small', variant: 'outlined',
+                    onClick: () => setQuery(tag),
+                    sx: { cursor: 'pointer', '&:hover': { bgcolor: alpha(COLORS.primary, 0.08), borderColor: COLORS.primary } }
+                  })
+                )
+              )
             ),
             loading && React.createElement(
               Box, { sx: { display: 'flex', justifyContent: 'center', py: 2 } },
@@ -4015,25 +4529,22 @@
             ),
             !loading && searched && results.length === 0 && React.createElement(
               Box, { sx: { py: 4, textAlign: 'center' } },
+              React.createElement(Typography, { sx: { fontSize: 32, mb: 1 } }, '\uD83D\uDD0D'),
               React.createElement(
                 Typography, { variant: 'body1', color: 'text.secondary' },
                 'No meetings found matching your search.'
               )
             ),
             !loading && results.length > 0 && React.createElement(
-              Stack, { spacing: 1.5 },
+              Stack, { spacing: 1.5, sx: { mt: 2 } },
               results.map((meeting) =>
                 React.createElement(
                   Card, {
                     key: meeting.id,
                     className: 'meeting-card',
                     sx: {
-                      borderRadius: '12px',
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                       transition: 'all 0.2s ease',
-                      '&:hover': { boxShadow: '0 4px 12px rgba(0,0,0,0.06)' },
+                      '&:hover': { boxShadow: '0 6px 20px rgba(20,20,43,0.08)', transform: 'translateY(-1px)', borderColor: alpha(COLORS.primary, 0.3) },
                       cursor: 'pointer',
                     },
                     onClick: () => {
@@ -4048,12 +4559,12 @@
                       React.createElement(
                         Box, { sx: { flex: 1, minWidth: 0 } },
                         React.createElement(
-                          Typography, { variant: 'h6', fontWeight: 600, noWrap: true },
+                          Typography, { variant: 'h6', fontWeight: 700, noWrap: true },
                           meeting.title || 'Untitled Meeting'
                         ),
                         React.createElement(
                           Typography, { variant: 'caption', color: 'text.secondary', display: 'block' },
-                          `${formatDateTime(meeting.date)} · ${formatTime(meeting.duration || 0)}`
+                          `${formatDateTime(meeting.date)} \u00b7 ${formatTime(meeting.duration || 0)}`
                         ),
                         React.createElement(
                           Box, { sx: { display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 } },
@@ -4062,7 +4573,7 @@
                               key: tag,
                               label: tag,
                               size: 'small',
-                              sx: { height: 20, fontSize: '0.6rem', borderRadius: '4px' }
+                              sx: { height: 20, fontSize: '0.6rem' }
                             })
                           )
                         ),
@@ -4145,16 +4656,43 @@
           'Settings'
         ),
         React.createElement(
+          Card, { sx: { mb: 3 } },
+          React.createElement(
+            CardContent, { sx: { p: 3 } },
+            React.createElement(
+              Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 } },
+              React.createElement(
+                Box, { sx: { display: 'flex', alignItems: 'center', gap: 1.5 } },
+                React.createElement(
+                  Box, {
+                    sx: {
+                      width: 36, height: 36, borderRadius: '10px',
+                      background: alpha(COLORS.aiAccent, 0.12),
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }
+                  },
+                  React.createElement(SmartToyIcon, { sx: { fontSize: 18, color: COLORS.aiAccent } })
+                ),
+                React.createElement(
+                  Box, null,
+                  React.createElement(Typography, { variant: 'subtitle1', fontWeight: 700 }, 'Developer Mode'),
+                  React.createElement(Typography, { variant: 'caption', color: 'text.secondary' }, 'Show Gemini and Supabase configuration')
+                )
+              ),
+              React.createElement(Switch, {
+                checked: !!draft.developerMode,
+                onChange: (e) => handlePreferenceChange('developerMode', e.target.checked),
+              })
+            )
+          )
+        ),
+        draft.developerMode && React.createElement(
           Alert, { severity: 'info', icon: React.createElement(LockIcon, { fontSize: 'small' }), sx: { mb: 3, borderRadius: '12px' } },
           'These credentials are stored only in this browser (localStorage / IndexedDB) - nothing is sent anywhere except directly to the services you configure below. The Gemini key is a real secret: this app has no backend to keep it hidden from anyone with access to this device or its dev tools. The Supabase "anon" key is designed to be public-safe - keep your data protected with Supabase Row Level Security policies, not by hiding this key.'
         ),
-        React.createElement(
+        draft.developerMode && React.createElement(
           Card, {
             sx: {
-              borderRadius: '16px',
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
               mb: 3,
             }
           },
@@ -4206,13 +4744,9 @@
             )
           )
         ),
-        React.createElement(
+        draft.developerMode && React.createElement(
           Card, {
             sx: {
-              borderRadius: '16px',
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
               mb: 3,
             }
           },
@@ -4510,7 +5044,7 @@
                 },
                 React.createElement(MicIcon, { sx: { color: '#fff', fontSize: 30 } })
               ),
-              React.createElement(Typography, { variant: 'h5', fontWeight: 700, sx: { letterSpacing: '-0.5px' } }, 'AI Meeting Assistant'),
+              React.createElement(Typography, { variant: 'h5', fontWeight: 700, sx: { letterSpacing: '-0.5px' } }, 'Meeting Room AI'),
               React.createElement(Typography, { variant: 'body2', color: 'text.secondary', sx: { mt: 0.5 } }, title)
             ),
 
@@ -4688,7 +5222,7 @@
     //  MAIN APP
     // ============================================================
     const App = () => {
-      const { state, initialized, authRequired, session, passwordRecovery } = useApp();
+      const { state, dispatch, initialized, authRequired, session, passwordRecovery } = useApp();
       const themeMode = state.darkMode ? 'dark' : 'light';
 
       const theme = useMemo(() => {
@@ -4696,68 +5230,74 @@
           palette: {
             mode: themeMode,
             primary: {
-              main: '#6C5CE7',
-              light: '#A29BFE',
-              dark: '#4A3DBF',
+              main: '#5B5FEF',
+              light: '#8B8FF5',
+              dark: '#4338CA',
             },
             secondary: {
-              main: '#00CEC9',
-              light: '#55EFC4',
-              dark: '#00B894',
+              main: '#7C3AED',
+              light: '#A78BFA',
+              dark: '#5B21B6',
             },
-            error: { main: '#E17055' },
-            warning: { main: '#FDCB6E' },
-            info: { main: '#74B9FF' },
-            success: { main: '#00B894' },
+            error: { main: '#EF4444' },
+            warning: { main: '#F59E0B' },
+            info: { main: '#3B82F6' },
+            success: { main: '#22C55E' },
             background: {
-              default: themeMode === 'dark' ? '#0f1117' : '#f5f7fb',
+              default: themeMode === 'dark' ? '#0f1117' : '#F7F8FC',
               paper: themeMode === 'dark' ? '#1a1d27' : '#ffffff',
             },
             text: {
-              primary: themeMode === 'dark' ? '#e8edf2' : '#1a1a2e',
-              secondary: themeMode === 'dark' ? '#8b92a5' : '#5a5a7a',
+              primary: themeMode === 'dark' ? '#e8edf2' : '#14142B',
+              secondary: themeMode === 'dark' ? '#8b92a5' : '#6B7280',
             },
           },
           typography: {
             fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
-            h4: { fontWeight: 700, letterSpacing: '-0.02em' },
-            h5: { fontWeight: 600, letterSpacing: '-0.01em' },
-            h6: { fontWeight: 600 },
+            h3: { fontWeight: 800, letterSpacing: '-0.03em' },
+            h4: { fontWeight: 800, letterSpacing: '-0.02em' },
+            h5: { fontWeight: 700, letterSpacing: '-0.015em' },
+            h6: { fontWeight: 700, letterSpacing: '-0.01em' },
+            subtitle1: { fontWeight: 600 },
+            subtitle2: { fontWeight: 600 },
             button: { textTransform: 'none', fontWeight: 600 },
           },
-          shape: { borderRadius: 12 },
+          shape: { borderRadius: 18 },
           components: {
             MuiCard: {
               styleOverrides: {
                 root: {
-                  borderRadius: 16,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  borderRadius: 20,
+                  boxShadow: themeMode === 'dark'
+                    ? '0 1px 2px rgba(0,0,0,0.2)'
+                    : '0 1px 2px rgba(20,20,43,0.03), 0 8px 24px rgba(20,20,43,0.05)',
                   border: '1px solid',
-                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-                  transition: 'box-shadow 0.2s ease, transform 0.2s ease',
+                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(20,20,43,0.05)',
+                  transition: 'box-shadow 0.25s ease, transform 0.25s ease',
                 }
               }
             },
             MuiButton: {
               styleOverrides: {
                 root: {
-                  borderRadius: 12,
+                  borderRadius: 14,
                   fontWeight: 600,
                   textTransform: 'none',
+                  transition: 'all 0.2s ease',
                 },
                 contained: {
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-                  '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.12)' },
+                  boxShadow: '0 2px 8px rgba(91,95,239,0.18)',
+                  '&:hover': { boxShadow: '0 6px 20px rgba(91,95,239,0.28)', transform: 'translateY(-1px)' },
                 }
               }
             },
             MuiAppBar: {
               styleOverrides: {
                 root: {
-                  backgroundColor: themeMode === 'dark' ? 'rgba(15,17,23,0.85)' : 'rgba(255,255,255,0.85)',
+                  backgroundColor: themeMode === 'dark' ? 'rgba(15,17,23,0.85)' : 'rgba(247,248,252,0.85)',
                   backdropFilter: 'blur(20px)',
                   borderBottom: '1px solid',
-                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(20,20,43,0.05)',
                 }
               }
             },
@@ -4766,25 +5306,25 @@
                 paper: {
                   backgroundColor: themeMode === 'dark' ? '#141720' : '#ffffff',
                   borderRight: '1px solid',
-                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                  borderColor: themeMode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(20,20,43,0.05)',
                 }
               }
             },
             MuiChip: {
               styleOverrides: {
                 root: {
-                  borderRadius: 8,
-                  fontWeight: 500,
+                  borderRadius: 10,
+                  fontWeight: 600,
                 }
               }
             },
             MuiListItemButton: {
               styleOverrides: {
                 root: {
-                  borderRadius: 12,
+                  borderRadius: 14,
                   '&.Mui-selected': {
-                    backgroundColor: 'rgba(108,92,231,0.12)',
-                    '&:hover': { backgroundColor: 'rgba(108,92,231,0.18)' },
+                    backgroundColor: 'rgba(91,95,239,0.10)',
+                    '&:hover': { backgroundColor: 'rgba(91,95,239,0.16)' },
                   }
                 }
               }
@@ -4792,7 +5332,7 @@
             MuiFab: {
               styleOverrides: {
                 root: {
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+                  boxShadow: '0 10px 30px rgba(91,95,239,0.35)',
                 }
               }
             },
@@ -4801,7 +5341,7 @@
                 indicator: {
                   height: 3,
                   borderRadius: '3px 3px 0 0',
-                  backgroundColor: '#6C5CE7',
+                  backgroundColor: '#5B5FEF',
                 }
               }
             },
@@ -4811,7 +5351,7 @@
                   textTransform: 'none',
                   fontWeight: 500,
                   '&.Mui-selected': {
-                    fontWeight: 600,
+                    fontWeight: 700,
                   }
                 }
               }
