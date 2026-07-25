@@ -695,7 +695,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -987,6 +987,23 @@ const QUOTE_CATEGORIES = ["Modular Kitchen","Wardrobe","Furniture","False Ceilin
 const QUOTE_UNITS = ["nos","sqft","rft","lot","hrs"];
 const HINGE_OPTIONS = ["Soft Close Hinges","Regular Close Hinges"];
 const FINISH_OPTIONS = ["Laminate — Normal Finish","Glossy Finish","Acrylic Finish"];
+// Searchable brand/material list shown against every line item. Grouped loosely
+// by material family so the datalist reads sensibly, but stored as a flat list
+// since <input list> datalists don't support <optgroup>.
+const BRAND_OPTIONS = [
+  "Century Ply","Greenply","Kitply","Archidply","Sarda Plywood",
+  "MR Grade Ply","BWR Grade Ply","BWP Grade Ply",
+  "Merino Laminate","Century Laminate","Sunmica",
+  "Hettich Hardware","Hafele Hardware","Ebco Hardware",
+  "Saint-Gobain Glass","Modi Glass",
+  "Franke Sink","Nirali Sink","Carysil Sink",
+  "Asian Paints","Berger Paints","Nerolac Paints",
+  "Godrej Hardware","Sleek Edge Band"
+];
+const QUOTATION_STATUSES = ["draft","sent","approved","rejected","expired","converted"];
+const QUOTATION_STATUS_LABELS = { draft:"Draft", sent:"Sent", approved:"Approved", rejected:"Rejected", expired:"Expired", converted:"Converted to Project" };
+const QUOTATION_STATUS_COLORS = { draft:"#5C6B73", sent:"#A9814F", approved:"#4C7A45", rejected:"#A33D3D", expired:"#8A6D3B", converted:"#0F3556" };
+const QUOTATION_COUNTER_KEY = "quotationCounter";
 const ROOM_TYPES = ["Kitchen","Living Room","Master Bedroom","Bedroom","Dining Room","Pooja Room","Study / Home Office","Utility Room","Balcony","Foyer / Entrance"];
 
 const HINGE_FINISH_CATEGORIES = ["Modular Kitchen","Wardrobe"];
@@ -999,7 +1016,8 @@ function blankQuoteItem(overrides){
     id: qItemId(), roomId: null, productName: "", features: "", category: "Modular Kitchen",
     dimLength: "", dimSecondary: "", dimType: "H",
     hinges: "", finish: "",
-    qty: 1, unit: "sqft", rate: 0
+    qty: 1, unit: "sqft", rate: 0,
+    brand: "", itemDiscountPercent: 0, itemNotes: "", imageId: null
   }, overrides || {});
 }
 
@@ -1012,8 +1030,49 @@ function defaultQuotation(){
     rooms: [], items: [],
     taxPercent: 18, discountPercent: 0,
     notes: "Validity: This quotation is valid for 60 days from the date of issue.\n\nPayment Schedule: Booking & Design Fee to confirm the project, 50% before Production, 40% before Installation, and the remaining 10% upon Project Handover.\n\nMaterials & Brands: We use Zynasty Recommend Ply, Greenply (Certified MR/BWP Grade), Crompton, Finolex, Ozone, and other equivalent premium brands based on project requirements.\n\nHardware: Premium quality Soft-Close or Regular-Close hinges and drawer channels are provided as per the selected package.\n\nExecution: Manufacturing begins after design approval and advance payment. Installation is scheduled once materials are ready and the site is prepared.\n\nQuality Assurance: All materials are sourced from trusted brands to ensure durability, superior finish, and long-lasting performance.",
+    internalNotes: "",
+    number: null,
+    version: 1,
+    status: "draft",
+    statusHistory: [],
+    paymentSchedule: { booking: 10, production: 50, installation: 30, handover: 10 },
     updatedAt: null
   };
+}
+
+// Assigns a permanent sequential quotation number (e.g. ZYN-2026-0001) the
+// first time a quotation is saved. Uses a single shared counter in storage so
+// numbers never collide across projects, even if two are created back to back.
+async function ensureQuotationNumber(q){
+  if(q.number) return;
+  let next = 1;
+  try{
+    const res = await window.storage.get(QUOTATION_COUNTER_KEY, true);
+    next = res && res.value ? (parseInt(res.value, 10) || 0) + 1 : 1;
+  }catch(e){ next = 1; }
+  try{ await window.storage.set(QUOTATION_COUNTER_KEY, String(next), true); }catch(e){ /* worst case: a later save retries */ }
+  const year = new Date().getFullYear();
+  q.number = "ZYN-" + year + "-" + String(next).padStart(4, "0");
+}
+
+function quotationStatusBadge(status){
+  const s = QUOTATION_STATUSES.indexOf(status) !== -1 ? status : "draft";
+  return `<span class="pill" style="background:${QUOTATION_STATUS_COLORS[s]}">${QUOTATION_STATUS_LABELS[s]}</span>`;
+}
+
+// Denormalizes the bits of a quotation the dashboard/list views need onto the
+// project record itself, so those screens never have to fetch every
+// quotation blob just to show a status card or a total.
+async function syncQuotationSummaryToProject(project, q, totals){
+  const patch = {
+    quotationNumber: q.number,
+    quotationVersion: q.version,
+    quotationStatus: q.status,
+    quotationGrandTotal: totals.grandTotal,
+    quotationUpdatedAt: q.updatedAt
+  };
+  Object.assign(project, patch);
+  try{ await updateStudioProject(project.id, patch); }catch(e){ /* dashboard will just show slightly stale data until next save */ }
 }
 
 async function loadQuotation(projectId){
@@ -1036,12 +1095,26 @@ async function loadQuotation(projectId){
     state.quotation.items = [];
   }
   if(!state.quotation.rooms) state.quotation.rooms = [];
+  if(!state.quotation.status || QUOTATION_STATUSES.indexOf(state.quotation.status) === -1) state.quotation.status = "draft";
+  if(!state.quotation.version) state.quotation.version = 1;
+  if(!state.quotation.statusHistory) state.quotation.statusHistory = [];
+  if(!state.quotation.paymentSchedule) state.quotation.paymentSchedule = { booking: 10, production: 50, installation: 30, handover: 10 };
+  if(state.quotation.internalNotes === undefined) state.quotation.internalNotes = "";
+  state.quotation.items = state.quotation.items.map(it=>{
+    if(it.brand === undefined) it.brand = "";
+    if(it.itemDiscountPercent === undefined) it.itemDiscountPercent = 0;
+    if(it.itemNotes === undefined) it.itemNotes = "";
+    if(it.imageId === undefined) it.imageId = null;
+    return it;
+  });
   const orphaned = state.quotation.items.filter(it=>!it.roomId || !state.quotation.rooms.some(r=>r.id===it.roomId));
   if(orphaned.length){
     const fallbackRoom = blankRoom({ name: "General" });
     state.quotation.rooms.push(fallbackRoom);
     orphaned.forEach(it=>{ it.roomId = fallbackRoom.id; });
   }
+  await loadQuoteItemImages(state.quotation);
+  state.quotationLastSavedSnapshot = JSON.stringify(state.quotation);
   render();
 }
 
@@ -1422,6 +1495,15 @@ function compressImageFile(file){
   });
 }
 
+async function loadQuoteItemImages(q){
+  if(!q) return;
+  const allIds = (q.items||[]).map(it=>it.imageId).filter(Boolean);
+  const missing = [...new Set(allIds)].filter(id=>!state.quoteItemImages[id]);
+  if(!missing.length) return;
+  const results = await Promise.all(missing.map(id=>window.storage.get("quote-item-image:"+id, true).catch(()=>null)));
+  results.forEach((res,i)=>{ if(res && res.value) state.quoteItemImages[missing[i]] = res.value; });
+}
+
 async function loadDesignStudioImages(p){
   if(!p) return;
   const ds = ensureDesignStudio(p);
@@ -1715,17 +1797,58 @@ function attachDesignStudioHandlers(){
   };
 }
 
-async function saveQuotation(){
+async function saveQuotation(silent){
   if(!state.quotationProjectId || !state.quotation) return;
+  const project = state.projects.find(p=>p.id===state.quotationProjectId);
+  await ensureQuotationNumber(state.quotation);
   state.quotation.updatedAt = new Date().toISOString();
+  const snapshot = JSON.stringify(state.quotation);
+  if(silent && snapshot === state.quotationLastSavedSnapshot) return; // nothing changed since last autosave
   try{
-    const result = await window.storage.set("quotation:" + state.quotationProjectId, JSON.stringify(state.quotation), true);
-    if(!result) showToast("Could not save quotation. Please try again.", true);
-    else showToast("Quotation saved.", false);
+    const result = await window.storage.set("quotation:" + state.quotationProjectId, snapshot, true);
+    if(!result){
+      if(!silent) showToast("Could not save quotation. Please try again.", true);
+      return;
+    }
+    state.quotationLastSavedSnapshot = snapshot;
+    if(project){
+      const t = computeQuoteTotals(state.quotation);
+      await syncQuotationSummaryToProject(project, state.quotation, t);
+    }
+    if(!silent) showToast("Quotation saved.", false);
+    else showAutosaveIndicator();
   }catch(e){
     console.error("Storage error", e);
-    showToast("Could not save quotation. Please try again.", true);
+    if(!silent) showToast("Could not save quotation. Please try again.", true);
   }
+}
+
+// Small non-intrusive "Auto-saved HH:MM:SS" flash next to the Save button —
+// deliberately not a toast, since a toast every few seconds while someone is
+// mid-edit would be noisy.
+function showAutosaveIndicator(){
+  const el = document.getElementById("autosaveIndicator");
+  if(!el) return;
+  const now = new Date();
+  el.textContent = "Auto-saved " + now.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+}
+
+let quotationAutosaveTimer = null;
+function startQuotationAutosave(){
+  stopQuotationAutosave();
+  quotationAutosaveTimer = setInterval(()=>{
+    if(state.screen !== "quotation" || !state.quotation) return;
+    // Don't fight the user's typing: only sync DOM → state when no field is
+    // mid-focus inside the rooms body (numeric inputs use their own
+    // per-keystroke path already, but text areas/notes rely on this sync).
+    const active = document.activeElement;
+    const typingInRooms = active && document.getElementById("roomsBody") && document.getElementById("roomsBody").contains(active);
+    if(!typingInRooms) syncQuoteItemsFromDOM();
+    saveQuotation(true);
+  }, 6000);
+}
+function stopQuotationAutosave(){
+  if(quotationAutosaveTimer){ clearInterval(quotationAutosaveTimer); quotationAutosaveTimer = null; }
 }
 
 const CLIENT_PORTAL_URL = "https://zynastyportal.pages.dev/";
@@ -1819,19 +1942,36 @@ function getItemQty(it){
   return Number(it.qty)||0;
 }
 
+// Per-item amount after that item's own line discount (e.g. a supplier
+// clearance rate on one SKU) — independent of the quotation-level discount.
+function getItemAmount(it){
+  const gross = getItemQty(it) * (Number(it.rate)||0);
+  const itemDiscount = gross * ((Number(it.itemDiscountPercent)||0) / 100);
+  return gross - itemDiscount;
+}
+
 function computeQuoteTotals(q){
-  const subtotal = q.items.reduce((sum,it)=> sum + getItemQty(it) * (Number(it.rate)||0), 0);
+  const subtotal = q.items.reduce((sum,it)=> sum + getItemAmount(it), 0);
   const discountAmt = subtotal * ((Number(q.discountPercent)||0) / 100);
   const taxable = subtotal - discountAmt;
   const taxAmt = taxable * ((Number(q.taxPercent)||0) / 100);
   const grandTotal = taxable + taxAmt;
-  return { subtotal, discountAmt, taxable, taxAmt, grandTotal };
+  const roundOff = Math.round(grandTotal) - grandTotal;
+  const grandTotalRounded = Math.round(grandTotal);
+  const schedule = (q.paymentSchedule) || { booking:10, production:50, installation:30, handover:10 };
+  const paymentAmounts = {
+    booking: grandTotalRounded * ((Number(schedule.booking)||0)/100),
+    production: grandTotalRounded * ((Number(schedule.production)||0)/100),
+    installation: grandTotalRounded * ((Number(schedule.installation)||0)/100),
+    handover: grandTotalRounded * ((Number(schedule.handover)||0)/100)
+  };
+  return { subtotal, discountAmt, taxable, taxAmt, grandTotal, roundOff, grandTotalRounded, paymentAmounts };
 }
 
 function renderQuoteItemCard(it){
   const isAuto = it.unit === "sqft" && it.dimLength !== "" && it.dimSecondary !== "";
   const qty = getItemQty(it);
-  const amt = qty * (Number(it.rate)||0);
+  const amt = getItemAmount(it);
   return `
     <div class="item-card" data-item-id="${it.id}">
       <button type="button" class="quote-remove item-remove-btn qi-remove" title="Remove item">✕</button>
@@ -1844,6 +1984,11 @@ function renderQuoteItemCard(it){
       <div class="box">
         <div class="item-box-label">2 · Item Features</div>
         <textarea class="qi-features" placeholder="e.g. BWR 16mm Ply with 1mm Laminate box, shutters and Soft Close Hinges (Glossy)">${escapeHtml(it.features)}</textarea>
+      </div>
+
+      <div class="box">
+        <div class="item-box-label">Material / Brand</div>
+        <input type="text" class="qi-brand" list="brandOptionsList" placeholder="Search or type a brand — e.g. Greenply, Hettich" value="${escapeAttr(it.brand)}">
       </div>
 
       <div class="box">
@@ -1885,7 +2030,26 @@ function renderQuoteItemCard(it){
         </select>
         <input type="text" inputmode="decimal" class="qi-qty" value="${qty}" ${isAuto ? "readonly title=\"Auto-calculated from dimensions\"" : ""}>
         <input type="text" inputmode="decimal" class="qi-rate" value="${it.rate}" placeholder="Rate">
+        <input type="text" inputmode="decimal" class="qi-itemdiscount" value="${it.itemDiscountPercent}" placeholder="Disc %" title="Item discount %" style="width:64px;">
         <div class="item-amt-badge">${fmtMoney(amt)}</div>
+      </div>
+
+      <div class="box" style="margin-top:12px;">
+        <div class="item-box-label">Internal Notes (studio only, never printed)</div>
+        <textarea class="qi-itemnotes" placeholder="e.g. Confirm stock with vendor before final approval">${escapeHtml(it.itemNotes)}</textarea>
+      </div>
+
+      <div class="box qi-image-box">
+        <div class="item-box-label">Reference Image</div>
+        ${it.imageId ? `
+          <div class="ds-thumb" style="width:96px;">
+            <img class="qi-image-preview" src="${state.quoteItemImages[it.imageId] || ""}" style="width:100%;height:100%;object-fit:cover;" alt="Item reference">
+            <button type="button" class="ds-thumb-remove qi-image-remove" title="Remove image">✕</button>
+          </div>` : `
+          <label class="ds-thumb-add" style="width:96px;">
+            + Add image
+            <input type="file" accept="image/*" class="qi-image-input" style="display:none;">
+          </label>`}
       </div>
     </div>`;
 }
@@ -1919,11 +2083,37 @@ function renderQuotation(){
     </div>`;
   }).join("") : `<div class="empty"><div class="display">Add a room to begin</div><div>Kitchen, Living Room, or any other residential room — line items are added within a room.</div></div>`;
 
+  const statusActions = {
+    draft: [{k:"sent", label:"Mark as Sent"}],
+    sent: [{k:"approved", label:"Mark Approved"}, {k:"rejected", label:"Mark Rejected"}, {k:"expired", label:"Mark Expired"}],
+    approved: [{k:"converted", label:"Convert to Project"}, {k:"rejected", label:"Mark Rejected"}],
+    rejected: [{k:"draft", label:"Reopen as Draft"}],
+    expired: [{k:"draft", label:"Reopen as Draft"}],
+    converted: []
+  };
+  const nextActions = statusActions[q.status] || statusActions.draft;
+
   return `
+    <datalist id="brandOptionsList">${BRAND_OPTIONS.map(b=>`<option value="${escapeAttr(b)}">`).join("")}</datalist>
+
     <div class="quote-header">
       <div class="eyebrow mono">Quotation Builder</div>
       <h1>${escapeHtml(project.projectName)}</h1>
       <div class="sub">${escapeHtml(formatClientName(project))} · Access code ${escapeHtml(project.accessCode)}</div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        ${quotationStatusBadge(q.status)}
+        <span class="code-chip mono">${escapeHtml(q.number || "Not yet numbered")}</span>
+        <span class="code-chip mono">V${q.version || 1}</span>
+        <span id="autosaveIndicator" style="font-size:11.5px;color:var(--slate);"></span>
+      </div>
+      ${nextActions.length ? `
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${nextActions.map(a=>`<button type="button" class="btn ghost quote-status-btn" data-status="${a.k}" style="padding:7px 12px;font-size:11.5px;">${a.label}</button>`).join("")}
+        <button type="button" class="btn ghost" id="duplicateQuotationBtn" style="padding:7px 12px;font-size:11.5px;">⧉ Duplicate as New Version</button>
+      </div>` : `
+      <div style="margin-top:10px;">
+        <button type="button" class="btn ghost" id="duplicateQuotationBtn" style="padding:7px 12px;font-size:11.5px;">⧉ Duplicate as New Version</button>
+      </div>`}
     </div>
 
     <div class="rooms-toolbar">
@@ -1937,17 +2127,38 @@ function renderQuotation(){
       <div class="quote-row"><label>Subtotal</label><span class="mono" id="quoteSubtotalVal">${fmtMoney(t.subtotal)}</span></div>
       <div class="quote-row"><label>Discount %</label><input type="text" inputmode="decimal" id="discountInput" value="${q.discountPercent}"></div>
       <div class="quote-row"><label>Tax / GST %</label><input type="text" inputmode="decimal" id="taxInput" value="${q.taxPercent}"></div>
-      <div class="quote-row total"><label>Grand Total</label><span id="quoteGrandTotalVal">${fmtMoney(t.grandTotal)}</span></div>
+      <div class="quote-row total"><label>Grand Total</label><span id="quoteGrandTotalVal">${fmtMoney(t.grandTotalRounded)}</span></div>
+    </div>
+
+    <div class="section-label">Payment Schedule</div>
+    <div class="field-row">
+      <div class="field"><label>Booking %</label><input type="text" inputmode="decimal" id="psBooking" value="${q.paymentSchedule.booking}"></div>
+      <div class="field"><label>Production %</label><input type="text" inputmode="decimal" id="psProduction" value="${q.paymentSchedule.production}"></div>
+      <div class="field"><label>Installation %</label><input type="text" inputmode="decimal" id="psInstallation" value="${q.paymentSchedule.installation}"></div>
+      <div class="field"><label>Handover %</label><input type="text" inputmode="decimal" id="psHandover" value="${q.paymentSchedule.handover}"></div>
+    </div>
+    <div style="font-size:12px;color:var(--slate);margin-bottom:10px;">Percentages should total <span id="psTotalPercent" class="mono">${(Number(q.paymentSchedule.booking)||0)+(Number(q.paymentSchedule.production)||0)+(Number(q.paymentSchedule.installation)||0)+(Number(q.paymentSchedule.handover)||0)}%</span></div>
+    <div class="facts" style="margin-top:0;">
+      <div><div class="fact-label">Booking Amount</div><div class="fact-val mono" id="psAmt_booking">${fmtMoney(t.paymentAmounts.booking)}</div></div>
+      <div><div class="fact-label">Production Payment</div><div class="fact-val mono" id="psAmt_production">${fmtMoney(t.paymentAmounts.production)}</div></div>
+      <div><div class="fact-label">Installation Payment</div><div class="fact-val mono" id="psAmt_installation">${fmtMoney(t.paymentAmounts.installation)}</div></div>
+      <div><div class="fact-label">Final Handover</div><div class="fact-val mono" id="psAmt_handover">${fmtMoney(t.paymentAmounts.handover)}</div></div>
     </div>
 
     <div class="field full" style="margin-top:16px;">
-      <label>Notes (terms, validity, payment schedule)</label>
+      <label>Customer Notes (printed on the quotation — terms, validity)</label>
       <textarea id="quoteNotes" placeholder="e.g. Quotation valid for 30 days. 50% advance, 50% on completion.">${escapeHtml(q.notes)}</textarea>
+    </div>
+
+    <div class="field full" style="margin-top:12px;">
+      <label>Internal Notes (studio only, never printed)</label>
+      <textarea id="quoteInternalNotes" placeholder="e.g. Client is price-sensitive on kitchen hardware — hold the line on wardrobe finish.">${escapeHtml(q.internalNotes||"")}</textarea>
     </div>
 
     <div class="quote-actions">
       <button type="button" class="btn" id="saveQuoteBtn">Save Quotation</button>
       <button type="button" class="btn ghost" id="updateQuotationBtn">${(project.initialQuotation || project.finalQuotation) ? "Update Quotation" : "Use Total as Quotation"}</button>
+      <button type="button" class="btn ghost" id="downloadQuotePdfBtn">⬇ Download PDF</button>
     </div>
   `;
 }
@@ -1977,13 +2188,30 @@ function syncQuoteItemsFromDOM(){
     item.unit = card.querySelector(".qi-unit").value;
     item.qty = card.querySelector(".qi-qty").value;
     item.rate = card.querySelector(".qi-rate").value;
+    const brandEl = card.querySelector(".qi-brand");
+    const itemDiscountEl = card.querySelector(".qi-itemdiscount");
+    const itemNotesEl = card.querySelector(".qi-itemnotes");
+    if(brandEl) item.brand = brandEl.value;
+    if(itemDiscountEl) item.itemDiscountPercent = itemDiscountEl.value;
+    if(itemNotesEl) item.itemNotes = itemNotesEl.value;
   });
   const discountEl = document.getElementById("discountInput");
   const taxEl = document.getElementById("taxInput");
   const notesEl = document.getElementById("quoteNotes");
+  const internalNotesEl = document.getElementById("quoteInternalNotes");
+  const bookingEl = document.getElementById("psBooking");
+  const productionEl = document.getElementById("psProduction");
+  const installationEl = document.getElementById("psInstallation");
+  const handoverEl = document.getElementById("psHandover");
   if(discountEl) q.discountPercent = discountEl.value;
   if(taxEl) q.taxPercent = taxEl.value;
   if(notesEl) q.notes = notesEl.value;
+  if(internalNotesEl) q.internalNotes = internalNotesEl.value;
+  if(!q.paymentSchedule) q.paymentSchedule = { booking:10, production:50, installation:30, handover:10 };
+  if(bookingEl) q.paymentSchedule.booking = bookingEl.value;
+  if(productionEl) q.paymentSchedule.production = productionEl.value;
+  if(installationEl) q.paymentSchedule.installation = installationEl.value;
+  if(handoverEl) q.paymentSchedule.handover = handoverEl.value;
 }
 
 // Strips a text+decimal input down to a valid numeric string (digits + one
@@ -2018,11 +2246,13 @@ function recalcItemRow(itemId){
   const dim2El = card.querySelector(".qi-dim2");
   const qtyEl = card.querySelector(".qi-qty");
   const rateEl = card.querySelector(".qi-rate");
+  const itemDiscountEl = card.querySelector(".qi-itemdiscount");
 
   const wasAuto = !!(qtyEl && qtyEl.hasAttribute("readonly"));
   if(dim1El) item.dimLength = sanitizeNumericValue(dim1El);
   if(dim2El) item.dimSecondary = sanitizeNumericValue(dim2El);
   if(rateEl) item.rate = sanitizeNumericValue(rateEl);
+  if(itemDiscountEl) item.itemDiscountPercent = sanitizeNumericValue(itemDiscountEl);
 
   const isAuto = item.unit === "sqft" && item.dimLength !== "" && item.dimSecondary !== "";
   if(isAuto !== wasAuto){
@@ -2043,17 +2273,35 @@ function recalcItemRow(itemId){
     qtyEl.value = qty;
   }
 
-  const amt = qty * (Number(item.rate)||0);
+  const amt = getItemAmount(item);
   const amtBadge = card.querySelector(".item-amt-badge");
   if(amtBadge) amtBadge.textContent = fmtMoney(amt);
   const dimResult = card.querySelector(".dim-result");
   if(dimResult) dimResult.textContent = "= " + qty + " sqft";
 
+  refreshQuoteTotalsUI();
+}
+
+// Recomputes totals + payment-schedule amounts and patches just those DOM
+// nodes — shared by the item-row and discount/tax/payment-schedule recalcs
+// so none of them need a full render() (which would drop focus mid-typing).
+function refreshQuoteTotalsUI(){
   const t = computeQuoteTotals(state.quotation);
   const subtotalEl = document.getElementById("quoteSubtotalVal");
   const grandTotalEl = document.getElementById("quoteGrandTotalVal");
   if(subtotalEl) subtotalEl.textContent = fmtMoney(t.subtotal);
-  if(grandTotalEl) grandTotalEl.textContent = fmtMoney(t.grandTotal);
+  if(grandTotalEl) grandTotalEl.textContent = fmtMoney(t.grandTotalRounded);
+  ["booking","production","installation","handover"].forEach(key=>{
+    const el = document.getElementById("psAmt_" + key);
+    if(el) el.textContent = fmtMoney(t.paymentAmounts[key]);
+  });
+  const scheduleTotalEl = document.getElementById("psTotalPercent");
+  if(scheduleTotalEl && state.quotation.paymentSchedule){
+    const sch = state.quotation.paymentSchedule;
+    const totalPct = (Number(sch.booking)||0) + (Number(sch.production)||0) + (Number(sch.installation)||0) + (Number(sch.handover)||0);
+    scheduleTotalEl.textContent = totalPct + "%";
+    scheduleTotalEl.style.color = totalPct === 100 ? "var(--sage)" : "var(--clay)";
+  }
 }
 
 // Same idea for the Discount %/Tax % fields in the summary panel — update
@@ -2063,9 +2311,19 @@ function recalcDiscountTax(){
   const taxEl = document.getElementById("taxInput");
   if(discountEl) state.quotation.discountPercent = sanitizeNumericValue(discountEl);
   if(taxEl) state.quotation.taxPercent = sanitizeNumericValue(taxEl);
-  const t = computeQuoteTotals(state.quotation);
-  const grandTotalEl = document.getElementById("quoteGrandTotalVal");
-  if(grandTotalEl) grandTotalEl.textContent = fmtMoney(t.grandTotal);
+  refreshQuoteTotalsUI();
+}
+
+// Same idea for the Payment Schedule % fields — update state and the four
+// computed amounts + the running "must total 100%" indicator, no re-render.
+function recalcPaymentSchedule(){
+  const q = state.quotation;
+  if(!q.paymentSchedule) q.paymentSchedule = { booking:10, production:50, installation:30, handover:10 };
+  ["booking","production","installation","handover"].forEach(key=>{
+    const el = document.getElementById("ps" + key[0].toUpperCase() + key.slice(1));
+    if(el) q.paymentSchedule[key] = sanitizeNumericValue(el);
+  });
+  refreshQuoteTotalsUI();
 }
 
 function attachQuotationHandlers(){
@@ -2105,14 +2363,48 @@ function attachQuotationHandlers(){
     rerenderPreservingFocus();
   };
 
-  body.querySelectorAll(".qi-qty, .qi-rate, .qi-dim1, .qi-dim2").forEach(el=>{
+  body.querySelectorAll(".qi-qty, .qi-rate, .qi-dim1, .qi-dim2, .qi-itemdiscount").forEach(el=>{
     el.addEventListener("input", ()=>{
       const card = el.closest(".item-card");
       if(card) recalcItemRow(card.dataset.itemId);
     });
   });
-  body.querySelectorAll(".qi-name, .qi-features, .qi-cat, .qi-unit, .qi-dimtype, .qi-hinges, .qi-finish").forEach(el=>{
+  body.querySelectorAll(".qi-name, .qi-features, .qi-cat, .qi-unit, .qi-dimtype, .qi-hinges, .qi-finish, .qi-brand, .qi-itemnotes").forEach(el=>{
     el.addEventListener("change", refreshCalcOnly);
+  });
+
+  body.querySelectorAll(".qi-image-input").forEach(input=>{
+    input.addEventListener("change", async ()=>{
+      const file = input.files && input.files[0];
+      if(!file) return;
+      syncQuoteItemsFromDOM();
+      const card = input.closest(".item-card");
+      const item = state.quotation.items.find(it=>it.id===card.dataset.itemId);
+      if(!item) return;
+      try{
+        const dataUrl = await compressImageFile(file);
+        const imgId = newImageId();
+        const result = await window.storage.set("quote-item-image:" + imgId, dataUrl, true);
+        if(!result){ showToast("Could not upload image. Please try again.", true); return; }
+        state.quoteItemImages[imgId] = dataUrl;
+        item.imageId = imgId;
+        rerenderPreservingFocus();
+      }catch(e){
+        showToast(e && e.message ? e.message : "Could not upload that image.", true);
+      }
+    });
+  });
+  body.querySelectorAll(".qi-image-remove").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      syncQuoteItemsFromDOM();
+      const card = btn.closest(".item-card");
+      const item = state.quotation.items.find(it=>it.id===card.dataset.itemId);
+      if(!item) return;
+      const oldId = item.imageId;
+      item.imageId = null;
+      rerenderPreservingFocus();
+      if(oldId){ try{ await window.storage.delete("quote-item-image:" + oldId, true); }catch(e){ /* orphaned blob, harmless */ } }
+    });
   });
   body.querySelectorAll(".qi-remove").forEach(btn=>{
     btn.addEventListener("click",(e)=>{
@@ -2166,9 +2458,16 @@ function attachQuotationHandlers(){
   const discountEl = document.getElementById("discountInput");
   const taxEl = document.getElementById("taxInput");
   const notesEl = document.getElementById("quoteNotes");
+  const internalNotesEl = document.getElementById("quoteInternalNotes");
   if(discountEl) discountEl.addEventListener("input", recalcDiscountTax);
   if(taxEl) taxEl.addEventListener("input", recalcDiscountTax);
   if(notesEl) notesEl.addEventListener("change", ()=>{ syncQuoteItemsFromDOM(); });
+  if(internalNotesEl) internalNotesEl.addEventListener("change", ()=>{ syncQuoteItemsFromDOM(); });
+
+  ["psBooking","psProduction","psInstallation","psHandover"].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener("input", recalcPaymentSchedule);
+  });
 
   const saveBtn = document.getElementById("saveQuoteBtn");
   if(saveBtn){
@@ -2246,6 +2545,81 @@ function attachQuotationHandlers(){
       render();
       await loadItemPresets();
       render();
+    };
+  }
+
+  document.querySelectorAll(".quote-status-btn").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      syncQuoteItemsFromDOM();
+      const newStatus = btn.dataset.status;
+      const q = state.quotation;
+      const project = state.projects.find(p=>p.id===state.quotationProjectId);
+      q.statusHistory = q.statusHistory || [];
+      q.statusHistory.push({ from: q.status, to: newStatus, at: new Date().toISOString() });
+      q.status = newStatus;
+      btn.disabled = true;
+      await saveQuotation();
+      if(project){
+        logActivity(project, "document", "Quotation status changed to " + QUOTATION_STATUS_LABELS[newStatus]);
+        await updateStudioProject(project.id, { activityLog: project.activityLog });
+        if(newStatus === "converted"){
+          const t = computeQuoteTotals(q);
+          project.initialQuotation = t.grandTotalRounded;
+          project.finalQuotation = t.grandTotalRounded;
+          await updateStudioProject(project.id, { initialQuotation: t.grandTotalRounded, finalQuotation: t.grandTotalRounded });
+        }
+      }
+      showToast("Quotation marked " + QUOTATION_STATUS_LABELS[newStatus] + ".", false);
+      render();
+    });
+  });
+
+  const duplicateBtn = document.getElementById("duplicateQuotationBtn");
+  if(duplicateBtn){
+    duplicateBtn.onclick = async ()=>{
+      syncQuoteItemsFromDOM();
+      duplicateBtn.disabled = true;
+      const q = state.quotation;
+      // Duplicating keeps the same project + line items but resets status to
+      // draft and bumps the version — the old numbered version stays exactly
+      // as it was (still fetchable under its own quotation-version key) in
+      // case anyone needs to see what was actually sent before.
+      try{
+        await window.storage.set("quotation-version:" + state.quotationProjectId + ":" + (q.number || "v" + q.version), JSON.stringify(q), true);
+      }catch(e){ /* archival copy is best-effort */ }
+      q.version = (q.version || 1) + 1;
+      q.status = "draft";
+      q.number = null;
+      await ensureQuotationNumber(q);
+      await saveQuotation();
+      showToast("Duplicated as version " + q.version + " (" + q.number + ").", false);
+      render();
+    };
+  }
+
+  const downloadPdfBtn = document.getElementById("downloadQuotePdfBtn");
+  if(downloadPdfBtn){
+    downloadPdfBtn.onclick = async ()=>{
+      syncQuoteItemsFromDOM();
+      const project = state.projects.find(p=>p.id===state.quotationProjectId);
+      if(!project) return;
+      downloadPdfBtn.disabled = true;
+      const originalLabel = downloadPdfBtn.textContent;
+      downloadPdfBtn.textContent = "Generating…";
+      try{
+        const pdfDataUrl = await generateQuotationPdf(project, state.quotation);
+        const a = document.createElement("a");
+        a.href = pdfDataUrl;
+        a.download = (state.quotation.number || "quotation") + "-" + (project.projectName || "project").replace(/[^a-z0-9]+/gi,"-") + ".pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }catch(e){
+        console.error("PDF generation failed", e);
+        showToast("Could not generate PDF: " + (e && e.message ? e.message : "unknown error"), true);
+      }
+      downloadPdfBtn.disabled = false;
+      downloadPdfBtn.textContent = originalLabel;
     };
   }
 }
@@ -2631,8 +3005,12 @@ function renderNotifications(){
 }
 
 
+let _lastRenderedScreen = null;
 function render(){
   const main = document.getElementById("main");
+  if(state.screen === "quotation" && _lastRenderedScreen !== "quotation") startQuotationAutosave();
+  if(state.screen !== "quotation" && _lastRenderedScreen === "quotation") stopQuotationAutosave();
+  _lastRenderedScreen = state.screen;
 
   if(state.screen !== "quotation"){
     const pickerWasOpen = state.showPresetPicker || state.showRoomPicker;
@@ -2654,7 +3032,7 @@ function render(){
 
   const headerBack = document.getElementById("headerBack");
   const headerCrmLink = document.getElementById("headerCrmLink");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "amcRequests"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "amcRequests" || state.screen === "quotationsOverview"){
     headerBack.style.display = "inline-block";
     if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
@@ -2673,6 +3051,12 @@ function render(){
     attachQuotationHandlers();
     renderPresetPicker();
     renderRoomPicker();
+    return;
+  }
+
+  if(state.screen === "quotationsOverview"){
+    main.innerHTML = renderQuotationsOverview();
+    attachQuotationsOverviewHandlers();
     return;
   }
 
@@ -2711,6 +3095,118 @@ function render(){
   }
 }
 
+function renderQuotationsOverview(){
+  const withQuotes = state.projects.filter(p=>p.quotationNumber);
+  const counts = { draft:0, sent:0, approved:0, rejected:0, expired:0, converted:0 };
+  withQuotes.forEach(p=>{ const s = p.quotationStatus || "draft"; if(counts[s] !== undefined) counts[s]++; });
+
+  const cardsHtml = QUOTATION_STATUSES.map(s=>`
+    <div class="card" data-status-card="${s}" style="cursor:pointer;padding:16px 18px;">
+      <div class="fact-label">${QUOTATION_STATUS_LABELS[s]}</div>
+      <div class="display" style="font-size:26px;margin-top:4px;color:${QUOTATION_STATUS_COLORS[s]}">${counts[s]}</div>
+    </div>`).join("");
+
+  let list = withQuotes.filter(p=>{
+    const matchesSearch = !state.quotationsSearch || (p.projectName + p.clientName + (p.quotationNumber||"")).toLowerCase().includes(state.quotationsSearch.toLowerCase());
+    const matchesFilter = state.quotationsStatusFilter === "all" || p.quotationStatus === state.quotationsStatusFilter;
+    return matchesSearch && matchesFilter;
+  });
+
+  list = list.slice().sort((a,b)=>{
+    if(state.quotationsSort === "amount") return (b.quotationGrandTotal||0) - (a.quotationGrandTotal||0);
+    if(state.quotationsSort === "oldest") return new Date(a.quotationUpdatedAt||0) - new Date(b.quotationUpdatedAt||0);
+    return new Date(b.quotationUpdatedAt||0) - new Date(a.quotationUpdatedAt||0); // recent (default)
+  });
+
+  const rowsHtml = list.length ? list.map(p=>`
+    <div class="card" data-open-quote="${p.id}" style="cursor:pointer;">
+      <div class="card-top">
+        <div>
+          <div class="card-title">${escapeHtml(p.projectName)}</div>
+          <div class="card-client">${escapeHtml(formatClientName(p))}</div>
+        </div>
+        ${quotationStatusBadge(p.quotationStatus || "draft")}
+      </div>
+      <div class="facts">
+        <div><div class="fact-label">Quotation No.</div><div class="fact-val mono">${escapeHtml(p.quotationNumber || "—")}</div></div>
+        <div><div class="fact-label">Version</div><div class="fact-val">V${p.quotationVersion || 1}</div></div>
+        <div><div class="fact-label">Grand Total</div><div class="fact-val">${fmtMoney(p.quotationGrandTotal)}</div></div>
+        <div><div class="fact-label">Last Updated</div><div class="fact-val">${p.quotationUpdatedAt ? fmtDate(p.quotationUpdatedAt.slice(0,10)) : "—"}</div></div>
+      </div>
+    </div>`).join("") : `<div class="empty">No quotations match your search/filter.</div>`;
+
+  const recentActivity = withQuotes.slice().sort((a,b)=>new Date(b.quotationUpdatedAt||0) - new Date(a.quotationUpdatedAt||0)).slice(0,5);
+
+  return `
+    <div class="quote-header">
+      <div class="eyebrow mono">Quotation Builder</div>
+      <h1>Quotations Dashboard</h1>
+      <div class="sub">${withQuotes.length} quotation${withQuotes.length===1?"":"s"} across all projects</div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:24px;">${cardsHtml}</div>
+
+    <div class="toolbar">
+      <input type="text" id="quotationsSearchInput" placeholder="Search by project, client, or quotation number…" value="${escapeHtml(state.quotationsSearch)}">
+      <select id="quotationsStatusFilterSelect">
+        <option value="all">All statuses</option>
+        ${QUOTATION_STATUSES.map(s=>`<option value="${s}" ${state.quotationsStatusFilter===s?"selected":""}>${QUOTATION_STATUS_LABELS[s]}</option>`).join("")}
+      </select>
+      <select id="quotationsSortSelect">
+        <option value="recent" ${state.quotationsSort==="recent"?"selected":""}>Most recent</option>
+        <option value="oldest" ${state.quotationsSort==="oldest"?"selected":""}>Oldest first</option>
+        <option value="amount" ${state.quotationsSort==="amount"?"selected":""}>Highest value</option>
+      </select>
+    </div>
+
+    <div class="grid">${rowsHtml}</div>
+
+    ${recentActivity.length ? `
+    <div class="section-label" style="margin-top:28px;">Recent Activity</div>
+    <div class="field-row">
+      <div class="field full" style="font-size:13px;">
+        ${recentActivity.map(p=>`<div style="padding:7px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:5px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <span>${escapeHtml(p.projectName)} — ${quotationStatusBadge(p.quotationStatus||"draft")}</span>
+          <span style="color:var(--slate);font-size:11.5px;white-space:nowrap;">${p.quotationUpdatedAt ? fmtDate(p.quotationUpdatedAt.slice(0,10)) : ""}</span>
+        </div>`).join("")}
+      </div>
+    </div>` : ""}
+  `;
+}
+
+function attachQuotationsOverviewHandlers(){
+  const searchEl = document.getElementById("quotationsSearchInput");
+  if(searchEl) searchEl.oninput = (e)=>{
+    state.quotationsSearch = e.target.value;
+    const selStart = e.target.selectionStart, selEnd = e.target.selectionEnd;
+    render();
+    const s2 = document.getElementById("quotationsSearchInput");
+    if(s2){ s2.focus(); try{ s2.setSelectionRange(selStart, selEnd); }catch(err){} }
+  };
+  const filterEl = document.getElementById("quotationsStatusFilterSelect");
+  if(filterEl) filterEl.onchange = (e)=>{ state.quotationsStatusFilter = e.target.value; render(); };
+  const sortEl = document.getElementById("quotationsSortSelect");
+  if(sortEl) sortEl.onchange = (e)=>{ state.quotationsSort = e.target.value; render(); };
+
+  document.querySelectorAll("[data-status-card]").forEach(card=>{
+    card.addEventListener("click", ()=>{
+      state.quotationsStatusFilter = card.dataset.statusCard;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-open-quote]").forEach(card=>{
+    card.addEventListener("click", async ()=>{
+      const projectId = card.dataset.openQuote;
+      state.screen = "quotation";
+      state.quotationProjectId = projectId;
+      state.quotation = null;
+      render();
+      await loadQuotation(projectId);
+    });
+  });
+}
+
 function renderStudio(){
   const liveProjects = state.projects.filter(p=>p.status !== "Lost");
   const lostProjects = state.projects.filter(p=>p.status === "Lost");
@@ -2738,6 +3234,7 @@ function renderStudio(){
         ${STAGES.map(s=>`<option value="${s}" ${state.filter===s?"selected":""}>${s}</option>`).join("")}
       </select>` : ""}
       <button class="btn ghost" id="designerProfilesBtn">Designer Profiles</button>
+      <button class="btn ghost" id="quotationsOverviewBtn">Quotations</button>
       <button class="btn ghost" id="amcRequestsBtn">AMC Requests${(()=>{ const openCount = state.amcRequests.filter(r=>r.status==="Open").length; return openCount ? ` (${openCount})` : ""; })()}</button>
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
@@ -4335,6 +4832,12 @@ function attachStudioHandlers(){
     if(!state.designersLoaded){ await loadDesigners(); render(); }
   };
 
+  const qOverviewBtn = document.getElementById("quotationsOverviewBtn");
+  if(qOverviewBtn) qOverviewBtn.onclick = ()=>{
+    state.screen = "quotationsOverview";
+    render();
+  };
+
   const amcBtn = document.getElementById("amcRequestsBtn");
   if(amcBtn) amcBtn.onclick = async ()=>{
     state.screen = "amcRequests";
@@ -4426,6 +4929,11 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
     state.confirmDeleteDesigner = null;
     render();
     if(designerModalWasOpen) popEditHistoryIfNeeded();
+    return;
+  }
+  if(state.screen === "quotationsOverview"){
+    state.screen = "main";
+    render();
     return;
   }
   if(state.screen === "presets"){
