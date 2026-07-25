@@ -1329,50 +1329,30 @@
     // ============================================================
     //  STORAGE ADAPTER (Supabase + IndexedDB + Storage + RPC)
     // ============================================================
+    // NOTE ON STORAGE STRATEGY
+    // ------------------------------------------------------------
+    // Recordings (audio, transcripts, summaries, action items, and the
+    // meeting records themselves) are ALWAYS stored locally on the
+    // device, in IndexedDB. They are never uploaded to, or read from,
+    // any server - regardless of whether Supabase credentials are
+    // configured. Supabase is used ONLY for account login/authentication
+    // (see the auth fetch() calls elsewhere in this file). This class
+    // used to also branch into a Supabase-backed cloud storage path
+    // whenever Supabase credentials were present, which is what caused
+    // "Save" and recordings to silently fail to persist (cloud writes
+    // failing due to missing tables/policies/bucket). That cloud
+    // storage branch has been removed entirely; this adapter is
+    // local-storage-only.
     class StorageAdapter {
-      constructor(supabaseUrl, supabaseAnonKey, bucketName, userId) {
-        this.useSupabase = !!(supabaseUrl && supabaseAnonKey);
-        this.bucketName = bucketName || 'zynasty.storage';
-        this.userId = userId || null;
-        if (this.useSupabase) {
-          this.supabase = getSupabaseClient(supabaseUrl, supabaseAnonKey);
-          this.tables = {
-            meetings: 'meetings',
-            transcripts: 'transcripts',
-            summaries: 'summaries',
-            actionItems: 'action_items',
-            settings: 'settings',
-          };
-        } else {
-          this.dbName = 'AIMeetingAssistant';
-          this.version = 2;
-          this.db = null;
-        }
+      constructor() {
+        this.useSupabase = false;
+        this.dbName = 'AIMeetingAssistant';
+        this.version = 2;
+        this.db = null;
       }
 
       async init() {
-        if (this.useSupabase) {
-          try {
-            const withTimeout = (promise, ms) => Promise.race([
-              promise,
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase init timed out after ' + ms + 'ms')), ms)),
-            ]);
-            const { error } = await withTimeout(
-              this.supabase.from(this.tables.meetings).select('id').limit(1),
-              5000
-            );
-            if (error) throw error;
-            if (window.__markStep) window.__markStep('Supabase Initialized', true);
-            return true;
-          } catch (e) {
-            console.warn('Supabase connection failed, falling back to IndexedDB', e);
-            if (window.__markStep) window.__markStep('Supabase Initialized', false, e.message);
-            this.useSupabase = false;
-            return this.initIndexedDB();
-          }
-        } else {
-          return this.initIndexedDB();
-        }
+        return this.initIndexedDB();
       }
 
       initIndexedDB() {
@@ -1425,143 +1405,78 @@
       }
 
       async put(store, data) {
-        if (this.useSupabase) {
-          const table = this.tables[store];
-          const payload = this.userId ? { ...data, user_id: this.userId } : data;
-          const { error } = await this.supabase.from(table).upsert(payload);
-          if (error) throw error;
-          return data;
-        } else {
-          return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readwrite');
-            const req = tx.objectStore(store).put(data);
-            req.onsuccess = () => resolve(data);
-            req.onerror = () => reject(req.error);
-          });
-        }
+        return new Promise((resolve, reject) => {
+          const tx = this.db.transaction(store, 'readwrite');
+          const req = tx.objectStore(store).put(data);
+          req.onsuccess = () => resolve(data);
+          req.onerror = () => reject(req.error);
+        });
       }
 
       async get(store, id) {
-        if (this.useSupabase) {
-          const table = this.tables[store];
-          const { data, error } = await this.supabase.from(table).select('*').eq('id', id).single();
-          if (error) {
-            if (error.code === 'PGRST116') return null;
-            throw error;
-          }
-          return data;
-        } else {
-          return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readonly');
-            const req = tx.objectStore(store).get(id);
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-          });
-        }
+        return new Promise((resolve, reject) => {
+          const tx = this.db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).get(id);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
       }
 
-      async getAll(store, index = null, value = null) {
-        if (this.useSupabase) {
-          const table = this.tables[store];
-          let query = this.supabase.from(table).select('*');
-          if (index && value !== null) query = query.eq(index, value);
-          const { data, error } = await query;
-          if (error) throw error;
-          return data || [];
-        } else {
-          return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readonly');
-            const req = tx.objectStore(store).getAll();
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-          });
-        }
+      async getAll(store) {
+        return new Promise((resolve, reject) => {
+          const tx = this.db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).getAll();
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
       }
 
       async delete(store, id) {
-        if (this.useSupabase) {
-          const table = this.tables[store];
-          const { error } = await this.supabase.from(table).delete().eq('id', id);
-          if (error) throw error;
-        } else {
-          return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readwrite');
-            const req = tx.objectStore(store).delete(id);
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-          });
-        }
+        return new Promise((resolve, reject) => {
+          const tx = this.db.transaction(store, 'readwrite');
+          const req = tx.objectStore(store).delete(id);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
       }
 
       async deleteAll(store) {
-        if (this.useSupabase) {
-          const table = this.tables[store];
-          const { error } = await this.supabase.from(table).delete().neq('id', '');
-          if (error) throw error;
-        } else {
-          return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readwrite');
-            const req = tx.objectStore(store).clear();
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-          });
-        }
+        return new Promise((resolve, reject) => {
+          const tx = this.db.transaction(store, 'readwrite');
+          const req = tx.objectStore(store).clear();
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
       }
 
       async getByIndex(store, index, value) {
-        if (this.useSupabase) {
-          const table = this.tables[store];
-          const { data, error } = await this.supabase.from(table).select('*').eq(index, value);
-          if (error) throw error;
-          return data || [];
-        } else {
-          const all = await this.getAll(store);
-          return all.filter(item => item[index] === value);
-        }
+        const all = await this.getAll(store);
+        return all.filter(item => item[index] === value);
       }
 
+      // Recordings never leave the device: the audio Blob is converted
+      // to a data URL and stored directly inside the meeting record in
+      // IndexedDB. meetingId is accepted for API-compatibility with the
+      // rest of the app but is not otherwise used here.
       async uploadAudio(meetingId, blob) {
-        if (!this.useSupabase) {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        }
-        const filePath = `meetings/${meetingId}/audio.webm`;
-        const { error } = await this.supabase.storage.from(this.bucketName).upload(filePath, blob, {
-          contentType: 'audio/webm',
-          cacheControl: '3600',
-          upsert: true,
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
         });
-        if (error) throw error;
-        const { data } = this.supabase.storage.from(this.bucketName).getPublicUrl(filePath);
-        return data.publicUrl;
       }
 
       async searchMeetings(query) {
-        if (!this.useSupabase) {
-          const all = await this.getAll('meetings');
-          const q = query.toLowerCase();
-          return all.filter(m =>
-            m.title?.toLowerCase().includes(q) ||
-            m.transcript?.toLowerCase().includes(q) ||
-            (m.tags || []).some(t => t.toLowerCase().includes(q)) ||
-            (m.people || []).some(p => p.toLowerCase().includes(q)) ||
-            (m.companies || []).some(c => c.toLowerCase().includes(q))
-          );
-        }
-        const { data, error } = await this.supabase.rpc('search_meetings', { search_query: query });
-        if (error) throw error;
-        const ids = data.map(d => d.id);
-        if (ids.length === 0) return [];
-        const { data: meetings, error: err2 } = await this.supabase.from(this.tables.meetings).select('*').in('id', ids);
-        if (err2) throw err2;
-        const rankMap = {};
-        data.forEach(d => { rankMap[d.id] = d.rank; });
-        meetings.sort((a, b) => (rankMap[b.id] || 0) - (rankMap[a.id] || 0));
-        return meetings;
+        const all = await this.getAll('meetings');
+        const q = query.toLowerCase();
+        return all.filter(m =>
+          m.title?.toLowerCase().includes(q) ||
+          m.transcript?.toLowerCase().includes(q) ||
+          (m.tags || []).some(t => t.toLowerCase().includes(q)) ||
+          (m.people || []).some(p => p.toLowerCase().includes(q)) ||
+          (m.companies || []).some(c => c.toLowerCase().includes(q))
+        );
       }
     }
 
@@ -1921,12 +1836,14 @@
         const init = async () => {
           try {
             let settings = state.settings;
-            const userId = (session && session.user && session.user.id) || null;
 
-            const adapter = new StorageAdapter(settings.supabaseUrl, settings.supabaseAnonKey, settings.storageBucket, userId);
+            // Recordings/meetings always live in local IndexedDB on this
+            // device - the adapter is constructed once and never
+            // reconnected based on Supabase settings (those only affect
+            // login, handled separately above).
+            const adapter = new StorageAdapter();
             await adapter.init();
             storageRef.current = adapter;
-            prevConnKeyRef.current = JSON.stringify([settings.supabaseUrl, settings.supabaseAnonKey, settings.storageBucket]);
 
             let meetings = await adapter.getAll('meetings');
             meetings = meetings.sort((a, b) => (b.date || 0) - (a.date || 0));
@@ -1977,8 +1894,6 @@
         };
       }, [settingsLoaded, authRequired, authChecked, session]);
 
-      const prevConnKeyRef = useRef(null);
-
       useEffect(() => {
         if (!storageRef.current) return;
         const saveSettings = async () => {
@@ -1990,34 +1905,9 @@
             } else {
               geminiServiceRef.current = null;
             }
-
-            // Only tear down and rebuild the storage connection (Supabase
-            // client or IndexedDB handle) when a field that actually
-            // affects that connection has changed - not on every settings
-            // save (e.g. toggling "auto-generate summary" or changing
-            // language used to reopen an IndexedDB connection every time,
-            // leaking connections and eventually crashing the app).
-            const connKey = JSON.stringify([
-              state.settings.supabaseUrl,
-              state.settings.supabaseAnonKey,
-              state.settings.storageBucket,
-            ]);
-            if (connKey === prevConnKeyRef.current) return;
-            prevConnKeyRef.current = connKey;
-
-            const oldAdapter = storageRef.current;
-            const userId = (session && session.user && session.user.id) || null;
-            const adapter = new StorageAdapter(
-              state.settings.supabaseUrl,
-              state.settings.supabaseAnonKey,
-              state.settings.storageBucket,
-              userId
-            );
-            await adapter.init();
-            storageRef.current = adapter;
-            if (oldAdapter && oldAdapter.db && typeof oldAdapter.db.close === 'function') {
-              oldAdapter.db.close();
-            }
+            // Note: the local IndexedDB storage connection never needs to be
+            // torn down/rebuilt here - it's independent of Supabase settings,
+            // which only affect login (see the auth effects above).
           } catch (e) {
             console.error('Error saving settings:', e);
           }
@@ -2879,18 +2769,20 @@
 
         setIsSaving(true);
         try {
+          const meetingId = generateId();
+
           let audioUrl = null;
           if (audioBlob) {
             try {
-              audioUrl = await uploadAudio(generateId(), audioBlob);
+              audioUrl = await uploadAudio(meetingId, audioBlob);
             } catch (e) {
-              console.warn('Audio upload failed:', e);
-              audioUrl = audioBlob ? URL.createObjectURL(audioBlob) : null;
+              console.warn('Audio save failed, recording will not be attached to this meeting:', e);
+              audioUrl = null;
             }
           }
 
           const meeting = {
-            id: generateId(),
+            id: meetingId,
             title: meetingTitle || generatedSummary?.title || 'Untitled Meeting',
             date: Date.now(),
             duration: Math.round(duration),
@@ -4833,8 +4725,12 @@
           React.createElement(
             CardContent, { sx: { p: 3 } },
             React.createElement(
-              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 2 } },
+              Typography, { variant: 'h6', fontWeight: 600, sx: { mb: 1 } },
               'Supabase Configuration'
+            ),
+            React.createElement(
+              Typography, { variant: 'body2', color: 'text.secondary', sx: { mb: 2 } },
+              'Used for account login only. Recordings, transcripts, and summaries are always stored locally on this device and are never uploaded.'
             ),
             React.createElement(
               TextField, {
@@ -4868,19 +4764,6 @@
                     )
                   )
                 }
-              }
-            ),
-            React.createElement(
-              TextField, {
-                fullWidth: true,
-                label: 'Storage Bucket Name',
-                value: draft.storageBucket || 'zynasty.storage',
-                onChange: (e) => { setDraft(prev => ({ ...prev, storageBucket: e.target.value })); setSupabaseDirty(true); },
-                placeholder: 'zynasty.storage',
-                variant: 'outlined',
-                size: 'small',
-                sx: { mb: 2 },
-                helperText: 'The bucket where audio recordings will be stored.'
               }
             ),
             React.createElement(
