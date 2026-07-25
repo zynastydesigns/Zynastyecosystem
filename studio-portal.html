@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root{
     color-scheme: light;
@@ -1246,12 +1247,39 @@ function buildHingeFinishTag(it){
   return parts.join("   ·   ");
 }
 
+// Renders a QR code to a PNG data URL using the qrcodejs library, via a
+// throwaway off-screen div (the library only knows how to draw into a real
+// DOM element). Cleans up after itself. Resolves null if the library didn't
+// load (e.g. offline) so PDF generation degrades gracefully instead of failing.
+function generateQrDataUrl(text){
+  return new Promise((resolve)=>{
+    if(typeof QRCode === "undefined"){ resolve(null); return; }
+    const holder = document.createElement("div");
+    holder.style.cssText = "position:fixed;left:-9999px;top:-9999px;";
+    document.body.appendChild(holder);
+    try{
+      new QRCode(holder, { text, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M });
+      // qrcodejs renders synchronously into a <canvas> (or <img> fallback in old IE).
+      setTimeout(()=>{
+        const canvas = holder.querySelector("canvas");
+        const dataUrl = canvas ? canvas.toDataURL("image/png") : null;
+        holder.remove();
+        resolve(dataUrl);
+      }, 50);
+    }catch(e){
+      holder.remove();
+      resolve(null);
+    }
+  });
+}
+
 async function generateQuotationPdf(project, quotation){
   if(!window.jspdf || !window.jspdf.jsPDF){
     throw new Error("PDF library did not load (check your internet connection and try again).");
   }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const qrDataUrl = await generateQrDataUrl(CLIENT_PORTAL_URL + "?code=" + encodeURIComponent(project.accessCode || ""));
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 40;
@@ -1311,6 +1339,8 @@ async function generateQuotationPdf(project, quotation){
     "Address: " + (project.propertyAddress || "—")
   ];
   const infoRight = [
+    "Quotation No: " + (quotation.number || "—"),
+    "Version: V" + (quotation.version || 1),
     "Access Code: " + (project.accessCode || "—"),
     "Date: " + new Date().toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})
   ];
@@ -1353,10 +1383,13 @@ async function generateQuotationPdf(project, quotation){
 
     const rows = items.map(it=>{
       const qty = getItemQty(it);
-      const amt = qty * (Number(it.rate)||0);
+      const amt = getItemAmount(it);
+      const tagParts = [buildHingeFinishTag(it)];
+      if(it.brand) tagParts.unshift("Brand: " + it.brand);
+      if(Number(it.itemDiscountPercent) > 0) tagParts.push("Item Discount: " + it.itemDiscountPercent + "%");
       return [
         it.productName || "—",
-        { main: it.features || "—", tag: buildHingeFinishTag(it) },
+        { main: it.features || "—", tag: tagParts.filter(Boolean).join("   ·   ") },
         String(qty), it.unit, fmtMoneyPdf(it.rate), fmtMoneyPdf(amt)
       ];
     });
@@ -1365,8 +1398,9 @@ async function generateQuotationPdf(project, quotation){
   });
 
   const t = computeQuoteTotals(quotation);
+  const showRoundOff = Math.abs(t.roundOff) >= 0.5;
   const boxW = 240;
-  const boxH = 92;
+  const boxH = showRoundOff ? 106 : 92;
   if(y + boxH > pageHeight - 50){ doc.addPage(); y = 50; }
   const boxX = pageWidth - margin - boxW;
   doc.setDrawColor(LINE[0],LINE[1],LINE[2]);
@@ -1386,7 +1420,14 @@ async function generateQuotationPdf(project, quotation){
   sy += 17;
   doc.text("Tax / GST (" + (Number(quotation.taxPercent)||0) + "%)", labelX, sy);
   doc.text(fmtMoneyPdf(t.taxAmt), valueX, sy, { align: "right" });
-  sy += 14;
+  sy += 17;
+  if(showRoundOff){
+    doc.text("Round Off", labelX, sy);
+    doc.text((t.roundOff >= 0 ? "+" : "-") + fmtMoneyPdf(Math.abs(t.roundOff)), valueX, sy, { align: "right" });
+    sy += 14;
+  } else {
+    sy -= 3;
+  }
   doc.setDrawColor(BRASS[0],BRASS[1],BRASS[2]);
   doc.setLineWidth(1);
   doc.line(labelX, sy, valueX, sy);
@@ -1395,8 +1436,34 @@ async function generateQuotationPdf(project, quotation){
   doc.setFontSize(13);
   doc.setTextColor(INK[0],INK[1],INK[2]);
   doc.text("Grand Total", labelX, sy);
-  doc.text(fmtMoneyPdf(t.grandTotal), valueX, sy, { align: "right" });
+  doc.text(fmtMoneyPdf(t.grandTotalRounded), valueX, sy, { align: "right" });
   y += boxH + 28;
+
+  // --- Payment Schedule ---
+  if(quotation.paymentSchedule){
+    if(y + 90 > pageHeight - 50){ doc.addPage(); y = 50; }
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(11);
+    doc.setTextColor(INK[0],INK[1],INK[2]);
+    doc.text("PAYMENT SCHEDULE", margin, y);
+    y += 12;
+    const psRows = [
+      ["Booking / Design Fee", (Number(quotation.paymentSchedule.booking)||0) + "%", fmtMoneyPdf(t.paymentAmounts.booking)],
+      ["Production Payment", (Number(quotation.paymentSchedule.production)||0) + "%", fmtMoneyPdf(t.paymentAmounts.production)],
+      ["Installation Payment", (Number(quotation.paymentSchedule.installation)||0) + "%", fmtMoneyPdf(t.paymentAmounts.installation)],
+      ["Final Handover", (Number(quotation.paymentSchedule.handover)||0) + "%", fmtMoneyPdf(t.paymentAmounts.handover)]
+    ];
+    y = drawPdfTable(doc, {
+      x: margin, width: tableWidth, startY: y,
+      columns: [
+        { label: "Milestone", frac: 0.55, align: "left" },
+        { label: "% of Total", frac: 0.2, align: "right" },
+        { label: "Amount", frac: 0.25, align: "right" }
+      ],
+      rows: psRows
+    });
+    y += 24;
+  }
 
   if(quotation.notes){
     if(y + 50 > pageHeight - 50){ doc.addPage(); y = 50; }
@@ -1412,6 +1479,63 @@ async function generateQuotationPdf(project, quotation){
     doc.setFont("helvetica","normal");
     doc.setTextColor(20,20,20);
     doc.text(split, margin + 12, y + 30);
+    y += notesBoxH + 28;
+  }
+
+  // --- QR code (links to the client portal) + signature / seal block ---
+  const sigBlockH = 110;
+  if(y + sigBlockH > pageHeight - 50){ doc.addPage(); y = 50; }
+  const sigY = y;
+  if(qrDataUrl){
+    try{
+      doc.addImage(qrDataUrl, "PNG", margin, sigY, 72, 72);
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(8);
+      doc.setTextColor(90,90,90);
+      doc.text("Scan to view your project portal", margin, sigY + 84);
+    }catch(e){ console.warn("QR code could not be embedded:", e); }
+  }
+
+  const sigX = pageWidth - margin - 200;
+  doc.setDrawColor(LINE[0],LINE[1],LINE[2]);
+  doc.setLineWidth(0.75);
+  // Signature line
+  doc.line(sigX, sigY + 55, sigX + 200, sigY + 55);
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(9);
+  doc.setTextColor(90,90,90);
+  doc.text("Authorized Signatory", sigX, sigY + 68);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(10);
+  doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.text("For " + COMPANY_DETAILS.name, sigX, sigY + 40);
+  // Company seal placeholder — a dashed circle a stamp can be pressed onto
+  doc.setDrawColor(BRASS[0],BRASS[1],BRASS[2]);
+  doc.setLineDashPattern([2,2], 0);
+  doc.circle(sigX + 165, sigY + 20, 22, "S");
+  doc.setLineDashPattern([], 0);
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(7);
+  doc.setTextColor(BRASS[0],BRASS[1],BRASS[2]);
+  doc.text("COMPANY SEAL", sigX + 165, sigY + 22, { align: "center" });
+
+  // --- Watermark + page numbers on every page ---
+  const totalPages = doc.internal.getNumberOfPages();
+  for(let i = 1; i <= totalPages; i++){
+    doc.setPage(i);
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({ opacity: 0.06 }));
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(60);
+    doc.setTextColor(INK[0],INK[1],INK[2]);
+    doc.text(COMPANY_DETAILS.name.toUpperCase(), pageWidth/2, pageHeight/2, { align: "center", angle: 35 });
+    doc.restoreGraphicsState();
+
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(120,120,120);
+    doc.text("Page " + i + " of " + totalPages, pageWidth - margin, pageHeight - 20, { align: "right" });
+    doc.text(quotation.number || "", margin, pageHeight - 20);
   }
 
   return doc.output("datauristring");
