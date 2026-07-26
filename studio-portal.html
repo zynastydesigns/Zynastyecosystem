@@ -2015,23 +2015,52 @@ function getFurnitureMaterialsStatus(p){
   return "pending";
 }
 
+function getFurniturePhasePercent(p){
+  const updates = p.productionUpdates || [];
+  const hasShipping = updates.some(u=>u.service==="Modular Furniture" && u.stage==="Shipping");
+  if(hasShipping) return 100;
+  const hasManufacturing = updates.some(u=>u.service==="Modular Furniture" && u.stage==="Manufacturing");
+  if(hasManufacturing) return 80;
+  if(getFurnitureMaterialsStatus(p) === "approved") return 66;
+  const allMaterials = updates.filter(u=>u.service==="Modular Furniture" && u.stage==="Materials").flatMap(u=>u.materials||[]);
+  if(!allMaterials.length) return 5;
+  const approvedCount = allMaterials.filter(m=>m.status==="approved").length;
+  return Math.max(5, Math.round((approvedCount / allMaterials.length) * 60));
+}
+
 function renderFurniturePhaseStepper(p){
   const hasFurniture = (p.productionUpdates||[]).some(u=>u.service==="Modular Furniture");
   if(!hasFurniture) return "";
   const status = getFurnitureMaterialsStatus(p);
   const phases = ["Materials", "Manufacturing", "Shipping"];
   const currentIdx = status === "approved" ? 1 : 0;
+  const percent = getFurniturePhasePercent(p);
   const stepsHtml = phases.map((ph,i)=>{
     const done = i < currentIdx, active = i === currentIdx;
-    const bg = done ? "#6E7D5E" : active ? "var(--ink)" : "var(--paper-2)";
-    const color = done||active ? "#fff" : "var(--slate)";
-    return `<span style="padding:6px 14px;border-radius:999px;background:${bg};color:${color};font-size:12px;font-weight:600;white-space:nowrap;">${i+1} · ${escapeHtml(ph)}</span>`;
-  }).join(`<span style="color:var(--line);">→</span>`);
+    const circleBg = done ? "#6E7D5E" : active ? "var(--ink)" : "#fff";
+    const circleColor = done||active ? "#fff" : "var(--slate)";
+    const circleBorder = done||active ? "transparent" : "var(--line)";
+    const labelColor = done||active ? "var(--ink)" : "var(--slate)";
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0;width:70px;">
+      <div style="width:32px;height:32px;border-radius:50%;background:${circleBg};border:2px solid ${circleBorder};color:${circleColor};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">${done ? "✓" : i+1}</div>
+      <div style="font-size:11px;font-weight:600;color:${labelColor};text-align:center;">${escapeHtml(ph)}</div>
+    </div>`;
+  }).join(`<div style="flex:1;height:2px;background:var(--line);margin-top:15px;min-width:12px;"></div>`);
   const note = status === "rejected" ? "The client disapproved a material — upload a replacement below to continue."
     : status === "pending" ? "Waiting on the client to approve the posted materials."
     : status === "approved" ? "All materials approved — this project has moved on to Manufacturing."
     : "";
-  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">${stepsHtml}</div>${note ? `<div style="font-size:12px;color:var(--slate);margin-bottom:16px;">${note}</div>` : `<div style="margin-bottom:10px;"></div>`}`;
+  return `
+  <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 16px 16px;margin-bottom:20px;">
+    <div style="display:flex;align-items:flex-start;margin-bottom:14px;">${stepsHtml}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--slate);margin-bottom:5px;">
+      <span>Furniture Production</span><span style="font-weight:700;color:var(--ink);">${percent}% Complete</span>
+    </div>
+    <div style="height:6px;border-radius:999px;background:var(--paper-2);overflow:hidden;">
+      <div style="height:100%;width:${percent}%;background:linear-gradient(90deg,#B5654A,#A9814F);border-radius:999px;"></div>
+    </div>
+    ${note ? `<div style="font-size:12px;color:var(--slate);margin-top:10px;">${note}</div>` : ""}
+  </div>`;
 }
 
 function ensureProductionUpdates(p){
