@@ -772,9 +772,62 @@ function escapeHtml(str){
 
 const PRODUCTION_UPDATE_COLORS = { "Modular Furniture": "#8C8F5E", "Civil Work": "#A9814F", "Painting": "#74845F" };
 
+// Mirrors the same gating logic in studio-portal.html: the Modular
+// Furniture phase only reads as having moved on to Manufacturing once
+// every material the studio has posted has been approved by the client.
+function getFurnitureMaterialsStatus(p){
+  const updates = (p.productionUpdates||[]).filter(u=>u.service==="Modular Furniture" && u.stage==="Materials");
+  const allMaterials = updates.flatMap(u=>u.materials||[]);
+  if(!allMaterials.length) return "none";
+  if(allMaterials.some(m=>m.status==="rejected")) return "rejected";
+  if(allMaterials.every(m=>m.status==="approved")) return "approved";
+  return "pending";
+}
+
+function renderFurniturePhaseStepper(p){
+  const hasFurniture = (p.productionUpdates||[]).some(u=>u.service==="Modular Furniture");
+  if(!hasFurniture) return "";
+  const status = getFurnitureMaterialsStatus(p);
+  const phases = ["Materials", "Manufacturing", "Shipping"];
+  const currentIdx = status === "approved" ? 1 : 0;
+  const stepsHtml = phases.map((ph,i)=>{
+    const done = i < currentIdx, active = i === currentIdx;
+    const bg = done ? "#6E7D5E" : active ? "var(--ink)" : "#eee";
+    const color = done||active ? "#fff" : "var(--slate)";
+    return `<span style="padding:6px 14px;border-radius:999px;background:${bg};color:${color};font-size:12px;font-weight:600;white-space:nowrap;">${i+1} · ${escapeHtml(ph)}</span>`;
+  }).join(`<span style="color:var(--line);">→</span>`);
+  const note = status === "pending" ? "Please review the material options below and approve or disapprove each one."
+    : status === "rejected" ? "You disapproved a material — your designer will upload a replacement here for you to review."
+    : status === "approved" ? "Materials approved — your project has moved on to Manufacturing."
+    : "";
+  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">${stepsHtml}</div>${note ? `<div style="font-size:13px;color:var(--slate);margin-bottom:14px;">${note}</div>` : ""}`;
+}
+
+function renderClientMaterialTile(u, m){
+  const src = state.productionUpdateImages[m.imageId];
+  const statusHtml = m.status === "approved"
+    ? `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:#e7f1e3;color:#3a5c33;font-size:11.5px;font-weight:600;">✓ Approved</span>`
+    : m.status === "rejected"
+    ? `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:#fbe9e6;color:#a1402f;font-size:11.5px;font-weight:600;">Disapproved — awaiting replacement</span>`
+    : `<div style="display:flex;gap:6px;">
+        <button type="button" class="mat-approve-btn" data-update="${u.id}" data-material="${m.id}" style="flex:1;padding:7px 10px;border:none;border-radius:6px;background:#6E7D5E;color:#fff;font-size:11.5px;font-weight:600;cursor:pointer;">Approve</button>
+        <button type="button" class="mat-disapprove-btn" data-update="${u.id}" data-material="${m.id}" style="flex:1;padding:7px 10px;border:1px solid #B5654A;border-radius:6px;background:#fff;color:#B5654A;font-size:11.5px;font-weight:600;cursor:pointer;">Disapprove</button>
+      </div>`;
+  return `
+  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;">
+    <div style="width:100%;aspect-ratio:1;background:#f4f2ee;">
+      ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--slate);">Loading…</div>`}
+    </div>
+    <div style="padding:8px 10px;">
+      ${m.label ? `<div style="font-size:12.5px;font-weight:600;margin-bottom:6px;">${escapeHtml(m.label)}</div>` : ""}
+      ${statusHtml}
+    </div>
+  </div>`;
+}
+
 async function loadProductionUpdateImages(p){
   if(!p) return;
-  const allIds = (p.productionUpdates||[]).flatMap(u=>u.images||[]);
+  const allIds = (p.productionUpdates||[]).flatMap(u=>[...(u.images||[]), ...((u.materials||[]).map(m=>m.imageId))]);
   const missing = [...new Set(allIds)].filter(id=>!state.productionUpdateImages[id]);
   if(!missing.length) return;
   const results = await Promise.all(missing.map(id=>window.storage.get("production-update-image:"+id, true).catch(()=>null)));
@@ -786,10 +839,16 @@ function renderProductionUpdatesForClient(p){
   if(!updates.length) return "";
   const cardsHtml = [...updates].reverse().map(u=>{
     const color = PRODUCTION_UPDATE_COLORS[u.service] || "var(--brass)";
-    const imagesHtml = (u.images||[]).map(imgId=>{
-      const src = state.productionUpdateImages[imgId];
-      return src ? `<div style="width:100px;height:100px;border-radius:8px;overflow:hidden;flex-shrink:0;"><img src="${src}" style="width:100%;height:100%;object-fit:cover;"></div>` : "";
-    }).join("");
+    const isMaterialsStage = u.service === "Modular Furniture" && u.stage === "Materials";
+    const bodyHtml = isMaterialsStage
+      ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:12px;">${(u.materials||[]).map(m=>renderClientMaterialTile(u,m)).join("")}</div>`
+      : (()=>{
+          const imagesHtml = (u.images||[]).map(imgId=>{
+            const src = state.productionUpdateImages[imgId];
+            return src ? `<div style="width:100px;height:100px;border-radius:8px;overflow:hidden;flex-shrink:0;"><img src="${src}" style="width:100%;height:100%;object-fit:cover;"></div>` : "";
+          }).join("");
+          return imagesHtml ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">${imagesHtml}</div>` : "";
+        })();
     return `
     <div style="padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
@@ -800,10 +859,10 @@ function renderProductionUpdatesForClient(p){
         <span style="font-size:11.5px;color:var(--slate);">${escapeHtml(fmtDate((u.createdAt||"").slice(0,10)))}</span>
       </div>
       ${u.note ? `<div style="font-size:13.5px;line-height:1.6;margin-top:10px;">${escapeHtml(u.note)}</div>` : ""}
-      ${imagesHtml ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">${imagesHtml}</div>` : ""}
+      ${bodyHtml}
     </div>`;
   }).join("");
-  return `<div class="portal-box" style="margin-top:14px;"><h3>Production Updates</h3><div style="margin-top:10px;">${cardsHtml}</div></div>`;
+  return `<div class="portal-box" style="margin-top:14px;"><h3>Production Updates</h3><div style="margin-top:10px;">${renderFurniturePhaseStepper(p)}${cardsHtml}</div></div>`;
 }
 function escapeAttr(str){ return escapeHtml(str); }
 
@@ -2641,6 +2700,33 @@ function attachClientHandlers(){
       });
     };
   }
+
+  document.querySelectorAll(".mat-approve-btn").forEach(b=>{
+    b.onclick = async ()=>{
+      const p = state.clientResult;
+      const u = (p.productionUpdates||[]).find(x=>x.id===b.dataset.update);
+      const m = u && (u.materials||[]).find(x=>x.id===b.dataset.material);
+      if(!m) return;
+      m.status = "approved";
+      m.respondedAt = new Date().toISOString();
+      render();
+      await saveClientProject(p, { productionUpdates: p.productionUpdates });
+    };
+  });
+
+  document.querySelectorAll(".mat-disapprove-btn").forEach(b=>{
+    b.onclick = async ()=>{
+      const p = state.clientResult;
+      const u = (p.productionUpdates||[]).find(x=>x.id===b.dataset.update);
+      const m = u && (u.materials||[]).find(x=>x.id===b.dataset.material);
+      if(!m) return;
+      if(!confirm(`Disapprove "${m.label || "this material"}"? Your designer will send a replacement for you to review.`)) return;
+      m.status = "rejected";
+      m.respondedAt = new Date().toISOString();
+      render();
+      await saveClientProject(p, { productionUpdates: p.productionUpdates });
+    };
+  });
 
   const callUsBtn = document.getElementById("callUsBtn");
   if(callUsBtn){

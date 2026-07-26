@@ -1996,9 +1996,43 @@ const PRODUCTION_UPDATE_COLORS = { "Modular Furniture": "#8C8F5E", "Civil Work":
 // posting an update. A service with no entry here (e.g. Painting) just
 // gets logged directly, no stage picker.
 const PRODUCTION_UPDATE_STAGES = {
-  "Modular Furniture": ["Sourcing", "Manufacturing", "Shipping"],
+  "Modular Furniture": ["Materials", "Manufacturing", "Shipping"],
   "Civil Work": ["Framing & Wiring", "Gypsum Board Installation", "Painting"]
 };
+
+// Modular Furniture's "Materials" stage is gated: the studio posts material
+// options (image + label) for the client to approve or disapprove one by
+// one, and the phase only reads as having moved on to Manufacturing once
+// every posted material has been approved. Kept as its own field on the
+// update (rather than reusing `images`) so approve/disapprove state has
+// somewhere to live per-photo.
+function getFurnitureMaterialsStatus(p){
+  const updates = (p.productionUpdates||[]).filter(u=>u.service==="Modular Furniture" && u.stage==="Materials");
+  const allMaterials = updates.flatMap(u=>u.materials||[]);
+  if(!allMaterials.length) return "none";
+  if(allMaterials.some(m=>m.status==="rejected")) return "rejected";
+  if(allMaterials.every(m=>m.status==="approved")) return "approved";
+  return "pending";
+}
+
+function renderFurniturePhaseStepper(p){
+  const hasFurniture = (p.productionUpdates||[]).some(u=>u.service==="Modular Furniture");
+  if(!hasFurniture) return "";
+  const status = getFurnitureMaterialsStatus(p);
+  const phases = ["Materials", "Manufacturing", "Shipping"];
+  const currentIdx = status === "approved" ? 1 : 0;
+  const stepsHtml = phases.map((ph,i)=>{
+    const done = i < currentIdx, active = i === currentIdx;
+    const bg = done ? "#6E7D5E" : active ? "var(--ink)" : "var(--paper-2)";
+    const color = done||active ? "#fff" : "var(--slate)";
+    return `<span style="padding:6px 14px;border-radius:999px;background:${bg};color:${color};font-size:12px;font-weight:600;white-space:nowrap;">${i+1} · ${escapeHtml(ph)}</span>`;
+  }).join(`<span style="color:var(--line);">→</span>`);
+  const note = status === "rejected" ? "The client disapproved a material — upload a replacement below to continue."
+    : status === "pending" ? "Waiting on the client to approve the posted materials."
+    : status === "approved" ? "All materials approved — this project has moved on to Manufacturing."
+    : "";
+  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">${stepsHtml}</div>${note ? `<div style="font-size:12px;color:var(--slate);margin-bottom:16px;">${note}</div>` : `<div style="margin-bottom:10px;"></div>`}`;
+}
 
 function ensureProductionUpdates(p){
   if(!Array.isArray(p.productionUpdates)) p.productionUpdates = [];
@@ -2006,15 +2040,37 @@ function ensureProductionUpdates(p){
 }
 function newProductionUpdateId(){ return "pu_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
 function newProductionImageId(){ return "puimg_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
+function newMaterialId(){ return "mat_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
 
 async function loadProductionUpdateImages(p){
   if(!p) return;
   const updates = ensureProductionUpdates(p);
-  const allIds = updates.flatMap(u=>u.images||[]);
+  const allIds = updates.flatMap(u=>[...(u.images||[]), ...((u.materials||[]).map(m=>m.imageId))]);
   const missing = [...new Set(allIds)].filter(id=>!state.productionUpdateImages[id]);
   if(!missing.length) return;
   const results = await Promise.all(missing.map(id=>window.storage.get("production-update-image:"+id, true).catch(()=>null)));
   results.forEach((res,i)=>{ if(res && res.value) state.productionUpdateImages[missing[i]] = res.value; });
+}
+
+function renderMaterialTile(u, m){
+  const src = state.productionUpdateImages[m.imageId];
+  const statusBadge = m.status === "approved"
+    ? `<span style="display:inline-block;padding:2px 8px;border-radius:12px;background:#e7f1e3;color:#3a5c33;font-size:10.5px;font-weight:600;">✓ Approved</span>`
+    : m.status === "rejected"
+    ? `<span style="display:inline-block;padding:2px 8px;border-radius:12px;background:#fbe9e6;color:#a1402f;font-size:10.5px;font-weight:600;">✕ Disapproved</span>`
+    : `<span style="display:inline-block;padding:2px 8px;border-radius:12px;background:#fbf5e6;color:#8a6d1f;font-size:10.5px;font-weight:600;">Awaiting approval</span>`;
+  return `
+  <div style="display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;">
+    <div style="position:relative;width:100%;aspect-ratio:1;background:var(--paper-2);">
+      ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--slate);">Loading…</div>`}
+      <button type="button" class="pu-material-remove" data-update="${u.id}" data-material="${m.id}" title="Remove" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.55);color:#fff;font-size:11px;cursor:pointer;line-height:1;">✕</button>
+    </div>
+    <input type="text" class="pu-material-label" data-update="${u.id}" data-material="${m.id}" value="${escapeAttr(m.label||"")}" placeholder="Material name" style="border:none;border-bottom:1px solid var(--line);padding:6px 8px;font-size:12px;width:100%;box-sizing:border-box;">
+    <div style="padding:6px 8px;display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
+      ${statusBadge}
+      ${m.status === "rejected" ? `<label style="font-size:10.5px;color:var(--brass);cursor:pointer;text-decoration:underline;">Replace<input type="file" accept="image/*" class="pu-material-replace-input" data-update="${u.id}" data-material="${m.id}" style="display:none;"></label>` : ""}
+    </div>
+  </div>`;
 }
 
 function renderProductionUpdates(){
@@ -2024,13 +2080,28 @@ function renderProductionUpdates(){
 
   const cardsHtml = [...updates].reverse().map(u=>{
     const color = PRODUCTION_UPDATE_COLORS[u.service] || "var(--brass)";
-    const imagesHtml = (u.images||[]).map(imgId=>{
-      const src = state.productionUpdateImages[imgId];
-      return `<div class="ds-thumb">
-        ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--slate);">Loading…</div>`}
-        <button type="button" class="ds-thumb-remove pu-image-remove" data-update="${u.id}" data-img="${imgId}" title="Remove image">✕</button>
+    const isMaterialsStage = u.service === "Modular Furniture" && u.stage === "Materials";
+    const bodyHtml = isMaterialsStage ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;">
+        ${(u.materials||[]).map(m=>renderMaterialTile(u,m)).join("")}
+        <label class="ds-thumb-add" data-update="${u.id}" style="min-height:130px;">
+          + Add Material
+          <input type="file" accept="image/*" multiple class="pu-material-add-input" data-update="${u.id}" style="display:none;">
+        </label>
+      </div>` : `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px;">
+        ${(u.images||[]).map(imgId=>{
+          const src = state.productionUpdateImages[imgId];
+          return `<div class="ds-thumb">
+            ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--slate);">Loading…</div>`}
+            <button type="button" class="ds-thumb-remove pu-image-remove" data-update="${u.id}" data-img="${imgId}" title="Remove image">✕</button>
+          </div>`;
+        }).join("")}
+        <label class="ds-thumb-add" data-update="${u.id}">
+          + Add Photo
+          <input type="file" accept="image/*" multiple class="pu-file-input" data-update="${u.id}" style="display:none;">
+        </label>
       </div>`;
-    }).join("");
     return `
     <div class="card" style="cursor:default;" data-update-id="${u.id}">
       <div class="card-top">
@@ -2044,19 +2115,14 @@ function renderProductionUpdates(){
         </div>
       </div>
       <textarea class="pu-note" data-update="${u.id}" placeholder="What's happening with ${escapeAttr(u.stage || u.service).toLowerCase()} right now? (shown to the client)" style="width:100%;min-height:60px;margin-top:10px;">${escapeHtml(u.note)}</textarea>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px;">
-        ${imagesHtml}
-        <label class="ds-thumb-add" data-update="${u.id}">
-          + Add Photo
-          <input type="file" accept="image/*" multiple class="pu-file-input" data-update="${u.id}" style="display:none;">
-        </label>
-      </div>
+      ${bodyHtml}
     </div>`;
   }).join("");
 
   return `
   <div class="display" style="font-size:22px;margin-bottom:4px;">Production Updates</div>
   <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--slate);margin-bottom:18px;">${escapeHtml(p.projectName)} · ${escapeHtml(formatClientName(p))}</div>
+  ${renderFurniturePhaseStepper(p)}
   <div class="toolbar" style="position:relative;">
     <div style="flex:1;font-size:12.5px;color:var(--slate);align-self:center;">Post progress photos and notes the client will see in their portal during Production.</div>
     <button type="button" class="btn ghost" id="puSaveBtn">Save Updates</button>
@@ -2100,7 +2166,7 @@ function attachProductionUpdatesHandlers(){
         render();
         return;
       }
-      updates.push({ id: newProductionUpdateId(), service, stage: null, note: "", images: [], createdAt: new Date().toISOString() });
+      updates.push({ id: newProductionUpdateId(), service, stage: null, note: "", images: [], materials: [], createdAt: new Date().toISOString() });
       state.showAddServicePicker = false;
       render();
     });
@@ -2115,7 +2181,7 @@ function attachProductionUpdatesHandlers(){
   document.querySelectorAll(".pu-stage-option").forEach(b=>{
     b.addEventListener("click", ()=>{
       const service = state.pendingServiceForStage;
-      updates.push({ id: newProductionUpdateId(), service, stage: b.dataset.stage, note: "", images: [], createdAt: new Date().toISOString() });
+      updates.push({ id: newProductionUpdateId(), service, stage: b.dataset.stage, note: "", images: [], materials: [], createdAt: new Date().toISOString() });
       state.showAddServicePicker = false;
       state.pendingServiceForStage = null;
       render();
@@ -2137,7 +2203,7 @@ function attachProductionUpdatesHandlers(){
       const u = updates.find(x=>x.id===b.dataset.update);
       if(!u) return;
       if(!confirm(`Delete this ${u.stage ? u.stage + " (" + u.service + ")" : u.service} update and its photos? This cannot be undone.`)) return;
-      const imageIds = u.images || [];
+      const imageIds = [...(u.images || []), ...((u.materials||[]).map(m=>m.imageId))];
       p.productionUpdates = updates.filter(x=>x.id!==b.dataset.update);
       logActivity(p, "file", `Deleted a ${u.stage ? u.stage + " (" + u.service + ")" : u.service} production update`);
       render();
@@ -2188,6 +2254,94 @@ function attachProductionUpdatesHandlers(){
       const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
       if(!ok) showToast("Could not save changes. Please try again.", true);
       try{ await window.storage.delete("production-update-image:"+b.dataset.img, true); }catch(e){ /* ignore */ }
+    });
+  });
+
+  document.querySelectorAll(".pu-material-add-input").forEach(inp=>{
+    inp.addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      if(!files.length) return;
+      const u = updates.find(x=>x.id===inp.dataset.update);
+      if(!u) return;
+      if(!Array.isArray(u.materials)) u.materials = [];
+      showToast(`Uploading ${files.length} material${files.length>1?"s":""}…`);
+      let uploaded = 0;
+      for(const file of files){
+        try{
+          const dataUrl = await compressImageFile(file);
+          const imgId = newProductionImageId();
+          const result = await window.storage.set("production-update-image:"+imgId, dataUrl, true);
+          if(!result){ showToast("Could not upload an image. Please try again.", true); continue; }
+          state.productionUpdateImages[imgId] = dataUrl;
+          u.materials.push({ id: newMaterialId(), imageId: imgId, label: file.name.replace(/\.[^.]+$/, ""), status: "pending" });
+          uploaded++;
+        }catch(err){
+          console.error(err);
+          showToast("Could not upload an image. Please try again.", true);
+        }
+      }
+      if(uploaded > 0){
+        logActivity(p, "file", `Added ${uploaded} material${uploaded>1?"s":""} for client approval`);
+      }
+      render();
+      const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+    });
+  });
+
+  document.querySelectorAll(".pu-material-replace-input").forEach(inp=>{
+    inp.addEventListener("change", async (e)=>{
+      const file = e.target.files && e.target.files[0];
+      if(!file) return;
+      const u = updates.find(x=>x.id===inp.dataset.update);
+      const m = u && (u.materials||[]).find(x=>x.id===inp.dataset.material);
+      if(!m) return;
+      const oldImageId = m.imageId;
+      try{
+        const dataUrl = await compressImageFile(file);
+        const imgId = newProductionImageId();
+        const result = await window.storage.set("production-update-image:"+imgId, dataUrl, true);
+        if(!result){ showToast("Could not upload an image. Please try again.", true); return; }
+        state.productionUpdateImages[imgId] = dataUrl;
+        m.imageId = imgId;
+        m.status = "pending";
+        m.respondedAt = "";
+        logActivity(p, "file", `Replaced "${m.label || "a material"}" with an updated option for client review`);
+        render();
+        const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
+        if(!ok) showToast("Could not save changes. Please try again.", true);
+        if(oldImageId) window.storage.delete("production-update-image:"+oldImageId, true).catch(()=>{});
+      }catch(err){
+        console.error(err);
+        showToast("Could not upload an image. Please try again.", true);
+      }
+    });
+  });
+
+  document.querySelectorAll(".pu-material-remove").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      const u = updates.find(x=>x.id===b.dataset.update);
+      if(!u) return;
+      const m = (u.materials||[]).find(x=>x.id===b.dataset.material);
+      if(!m) return;
+      if(!confirm(`Remove "${m.label || "this material"}"? This cannot be undone.`)) return;
+      u.materials = (u.materials||[]).filter(x=>x.id!==b.dataset.material);
+      logActivity(p, "file", `Removed a material option`);
+      render();
+      const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+      try{ await window.storage.delete("production-update-image:"+m.imageId, true); }catch(e){ /* ignore */ }
+    });
+  });
+
+  document.querySelectorAll(".pu-material-label").forEach(inp=>{
+    inp.addEventListener("change", async ()=>{
+      const u = updates.find(x=>x.id===inp.dataset.update);
+      const m = u && (u.materials||[]).find(x=>x.id===inp.dataset.material);
+      if(!m) return;
+      m.label = inp.value;
+      const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
     });
   });
 
