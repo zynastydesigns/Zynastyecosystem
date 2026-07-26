@@ -60,6 +60,8 @@
   .section-tab.active .count{background:var(--brass);color:var(--paper);}
   .section-tab.lost.active{border-bottom-color:#A33D3D;}
   .section-tab.lost.active .count{background:#A33D3D;}
+  .section-tab.completed.active{border-bottom-color:#5F7A56;}
+  .section-tab.completed.active .count{background:#5F7A56;}
   .toolbar input[type=text], .toolbar select{
     font-family:'IBM Plex Sans',sans-serif;font-size:16px;
     border:1px solid var(--line);background:#fff;border-radius:6px;padding:10px 12px;color:var(--ink);
@@ -704,7 +706,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, pendingServiceForStage: null, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -1990,6 +1992,13 @@ function attachDesignStudioHandlers(){
 // ---------------------------------------------------------------------
 const PRODUCTION_UPDATE_SERVICES = ["Modular Furniture", "Civil Work", "Painting"];
 const PRODUCTION_UPDATE_COLORS = { "Modular Furniture": "#8C8F5E", "Civil Work": "#A9814F", "Painting": "#74845F" };
+// Services with a fixed set of sub-stages the studio picks from when
+// posting an update. A service with no entry here (e.g. Painting) just
+// gets logged directly, no stage picker.
+const PRODUCTION_UPDATE_STAGES = {
+  "Modular Furniture": ["Sourcing", "Manufacturing", "Shipping"],
+  "Civil Work": ["Framing & Wiring", "Gypsum Board Installation", "Painting"]
+};
 
 function ensureProductionUpdates(p){
   if(!Array.isArray(p.productionUpdates)) p.productionUpdates = [];
@@ -2025,13 +2034,16 @@ function renderProductionUpdates(){
     return `
     <div class="card" style="cursor:default;" data-update-id="${u.id}">
       <div class="card-top">
-        <span style="display:inline-block;padding:4px 10px;border-radius:20px;background:${color};color:#fff;font-size:11.5px;font-weight:600;letter-spacing:0.3px;">${escapeHtml(u.service)}</span>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="display:inline-block;padding:4px 10px;border-radius:20px;background:${color};color:#fff;font-size:11.5px;font-weight:600;letter-spacing:0.3px;">${escapeHtml(u.service)}</span>
+          ${u.stage ? `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:var(--paper-2);color:var(--ink);font-size:11.5px;font-weight:600;letter-spacing:0.3px;border:1px solid var(--line);">${escapeHtml(u.stage)}</span>` : ""}
+        </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--slate);">${escapeHtml(fmtDate((u.createdAt||"").slice(0,10)))}</span>
           <button type="button" class="icon-btn pu-delete-update" data-update="${u.id}">🗑</button>
         </div>
       </div>
-      <textarea class="pu-note" data-update="${u.id}" placeholder="What's happening with ${escapeAttr(u.service).toLowerCase()} right now? (shown to the client)" style="width:100%;min-height:60px;margin-top:10px;">${escapeHtml(u.note)}</textarea>
+      <textarea class="pu-note" data-update="${u.id}" placeholder="What's happening with ${escapeAttr(u.stage || u.service).toLowerCase()} right now? (shown to the client)" style="width:100%;min-height:60px;margin-top:10px;">${escapeHtml(u.note)}</textarea>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px;">
         ${imagesHtml}
         <label class="ds-thumb-add" data-update="${u.id}">
@@ -2050,8 +2062,14 @@ function renderProductionUpdates(){
     <button type="button" class="btn ghost" id="puSaveBtn">Save Updates</button>
     <button type="button" class="btn" id="puAddServiceBtn">+ Add Service</button>
     ${state.showAddServicePicker ? `
-    <div style="position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.12);padding:6px;z-index:5;display:flex;flex-direction:column;min-width:180px;">
+    <div style="position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.12);padding:6px;z-index:5;display:flex;flex-direction:column;min-width:200px;">
+      ${state.pendingServiceForStage ? `
+      <button type="button" class="pu-stage-back" style="text-align:left;padding:9px 12px;border:none;background:none;font-size:12px;color:var(--slate);border-radius:6px;cursor:pointer;">← Back</button>
+      <div style="padding:4px 12px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--slate);">${escapeHtml(state.pendingServiceForStage)} stage</div>
+      ${(PRODUCTION_UPDATE_STAGES[state.pendingServiceForStage]||[]).map(st=>`<button type="button" class="pu-stage-option" data-stage="${escapeAttr(st)}" style="text-align:left;padding:9px 12px;border:none;background:none;font-size:13.5px;border-radius:6px;cursor:pointer;">${escapeHtml(st)}</button>`).join("")}
+      ` : `
       ${PRODUCTION_UPDATE_SERVICES.map(s=>`<button type="button" class="pu-service-option" data-service="${escapeAttr(s)}" style="text-align:left;padding:9px 12px;border:none;background:none;font-size:13.5px;border-radius:6px;cursor:pointer;">${escapeHtml(s)}</button>`).join("")}
+      `}
     </div>` : ""}
   </div>
   ${updates.length ? `<div class="grid">${cardsHtml}</div>` : `
@@ -2070,13 +2088,36 @@ function attachProductionUpdatesHandlers(){
   const addServiceBtn = document.getElementById("puAddServiceBtn");
   if(addServiceBtn) addServiceBtn.onclick = ()=>{
     state.showAddServicePicker = !state.showAddServicePicker;
+    state.pendingServiceForStage = null;
     render();
   };
 
   document.querySelectorAll(".pu-service-option").forEach(b=>{
     b.addEventListener("click", ()=>{
-      updates.push({ id: newProductionUpdateId(), service: b.dataset.service, note: "", images: [], createdAt: new Date().toISOString() });
+      const service = b.dataset.service;
+      if(PRODUCTION_UPDATE_STAGES[service]){
+        state.pendingServiceForStage = service;
+        render();
+        return;
+      }
+      updates.push({ id: newProductionUpdateId(), service, stage: null, note: "", images: [], createdAt: new Date().toISOString() });
       state.showAddServicePicker = false;
+      render();
+    });
+  });
+
+  const stageBackBtn = document.querySelector(".pu-stage-back");
+  if(stageBackBtn) stageBackBtn.addEventListener("click", ()=>{
+    state.pendingServiceForStage = null;
+    render();
+  });
+
+  document.querySelectorAll(".pu-stage-option").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const service = state.pendingServiceForStage;
+      updates.push({ id: newProductionUpdateId(), service, stage: b.dataset.stage, note: "", images: [], createdAt: new Date().toISOString() });
+      state.showAddServicePicker = false;
+      state.pendingServiceForStage = null;
       render();
     });
   });
@@ -2095,10 +2136,10 @@ function attachProductionUpdatesHandlers(){
     b.addEventListener("click", async ()=>{
       const u = updates.find(x=>x.id===b.dataset.update);
       if(!u) return;
-      if(!confirm(`Delete this ${u.service} update and its photos? This cannot be undone.`)) return;
+      if(!confirm(`Delete this ${u.stage ? u.stage + " (" + u.service + ")" : u.service} update and its photos? This cannot be undone.`)) return;
       const imageIds = u.images || [];
       p.productionUpdates = updates.filter(x=>x.id!==b.dataset.update);
-      logActivity(p, "file", `Deleted a ${u.service} production update`);
+      logActivity(p, "file", `Deleted a ${u.stage ? u.stage + " (" + u.service + ")" : u.service} production update`);
       render();
       const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
       if(!ok) showToast("Could not save changes. Please try again.", true);
@@ -2129,7 +2170,7 @@ function attachProductionUpdatesHandlers(){
         }
       }
       if(uploaded > 0){
-        logActivity(p, "file", `Uploaded ${uploaded} photo${uploaded>1?"s":""} to a ${u.service} update`);
+        logActivity(p, "file", `Uploaded ${uploaded} photo${uploaded>1?"s":""} to a ${u.stage ? u.stage + " (" + u.service + ")" : u.service} update`);
       }
       render();
       const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
@@ -2142,7 +2183,7 @@ function attachProductionUpdatesHandlers(){
       const u = updates.find(x=>x.id===b.dataset.update);
       if(!u) return;
       u.images = u.images.filter(id=>id!==b.dataset.img);
-      logActivity(p, "file", `Removed a photo from a ${u.service} update`);
+      logActivity(p, "file", `Removed a photo from a ${u.stage ? u.stage + " (" + u.service + ")" : u.service} update`);
       render();
       const ok = await updateStudioProject(p.id, { productionUpdates: p.productionUpdates, activityLog: p.activityLog });
       if(!ok) showToast("Could not save changes. Please try again.", true);
@@ -3397,7 +3438,7 @@ function render(){
 
   const headerBack = document.getElementById("headerBack");
   const headerCrmLink = document.getElementById("headerCrmLink");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "productionUpdates" || state.screen === "amcRequests" || state.screen === "quotationsOverview"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "productionUpdates" || state.screen === "amcRequests"){
     headerBack.style.display = "inline-block";
     if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
@@ -3416,12 +3457,6 @@ function render(){
     attachQuotationHandlers();
     renderPresetPicker();
     renderRoomPicker();
-    return;
-  }
-
-  if(state.screen === "quotationsOverview"){
-    main.innerHTML = renderQuotationsOverview();
-    attachQuotationsOverviewHandlers();
     return;
   }
 
@@ -3466,123 +3501,12 @@ function render(){
   }
 }
 
-function renderQuotationsOverview(){
-  const withQuotes = state.projects.filter(p=>p.quotationNumber);
-  const counts = { draft:0, sent:0, approved:0, rejected:0, expired:0, converted:0 };
-  withQuotes.forEach(p=>{ const s = p.quotationStatus || "draft"; if(counts[s] !== undefined) counts[s]++; });
-
-  const cardsHtml = QUOTATION_STATUSES.map(s=>`
-    <div class="card" data-status-card="${s}" style="cursor:pointer;padding:16px 18px;">
-      <div class="fact-label">${QUOTATION_STATUS_LABELS[s]}</div>
-      <div class="display" style="font-size:26px;margin-top:4px;color:${QUOTATION_STATUS_COLORS[s]}">${counts[s]}</div>
-    </div>`).join("");
-
-  let list = withQuotes.filter(p=>{
-    const matchesSearch = !state.quotationsSearch || (p.projectName + p.clientName + (p.quotationNumber||"")).toLowerCase().includes(state.quotationsSearch.toLowerCase());
-    const matchesFilter = state.quotationsStatusFilter === "all" || p.quotationStatus === state.quotationsStatusFilter;
-    return matchesSearch && matchesFilter;
-  });
-
-  list = list.slice().sort((a,b)=>{
-    if(state.quotationsSort === "amount") return (b.quotationGrandTotal||0) - (a.quotationGrandTotal||0);
-    if(state.quotationsSort === "oldest") return new Date(a.quotationUpdatedAt||0) - new Date(b.quotationUpdatedAt||0);
-    return new Date(b.quotationUpdatedAt||0) - new Date(a.quotationUpdatedAt||0); // recent (default)
-  });
-
-  const rowsHtml = list.length ? list.map(p=>`
-    <div class="card" data-open-quote="${p.id}" style="cursor:pointer;">
-      <div class="card-top">
-        <div>
-          <div class="card-title">${escapeHtml(p.projectName)}</div>
-          <div class="card-client">${escapeHtml(formatClientName(p))}</div>
-        </div>
-        ${quotationStatusBadge(p.quotationStatus || "draft")}
-      </div>
-      <div class="facts">
-        <div><div class="fact-label">Quotation No.</div><div class="fact-val mono">${escapeHtml(p.quotationNumber || "—")}</div></div>
-        <div><div class="fact-label">Version</div><div class="fact-val">V${p.quotationVersion || 1}</div></div>
-        <div><div class="fact-label">Grand Total</div><div class="fact-val">${fmtMoney(p.quotationGrandTotal)}</div></div>
-        <div><div class="fact-label">Last Updated</div><div class="fact-val">${p.quotationUpdatedAt ? fmtDate(p.quotationUpdatedAt.slice(0,10)) : "—"}</div></div>
-      </div>
-    </div>`).join("") : `<div class="empty">No quotations match your search/filter.</div>`;
-
-  const recentActivity = withQuotes.slice().sort((a,b)=>new Date(b.quotationUpdatedAt||0) - new Date(a.quotationUpdatedAt||0)).slice(0,5);
-
-  return `
-    <div class="quote-header">
-      <div class="eyebrow mono">Quotation Builder</div>
-      <h1>Quotations Dashboard</h1>
-      <div class="sub">${withQuotes.length} quotation${withQuotes.length===1?"":"s"} across all projects</div>
-    </div>
-
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:24px;">${cardsHtml}</div>
-
-    <div class="toolbar">
-      <input type="text" id="quotationsSearchInput" placeholder="Search by project, client, or quotation number…" value="${escapeHtml(state.quotationsSearch)}">
-      <select id="quotationsStatusFilterSelect">
-        <option value="all">All statuses</option>
-        ${QUOTATION_STATUSES.map(s=>`<option value="${s}" ${state.quotationsStatusFilter===s?"selected":""}>${QUOTATION_STATUS_LABELS[s]}</option>`).join("")}
-      </select>
-      <select id="quotationsSortSelect">
-        <option value="recent" ${state.quotationsSort==="recent"?"selected":""}>Most recent</option>
-        <option value="oldest" ${state.quotationsSort==="oldest"?"selected":""}>Oldest first</option>
-        <option value="amount" ${state.quotationsSort==="amount"?"selected":""}>Highest value</option>
-      </select>
-    </div>
-
-    <div class="grid">${rowsHtml}</div>
-
-    ${recentActivity.length ? `
-    <div class="section-label" style="margin-top:28px;">Recent Activity</div>
-    <div class="field-row">
-      <div class="field full" style="font-size:13px;">
-        ${recentActivity.map(p=>`<div style="padding:7px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:5px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-          <span>${escapeHtml(p.projectName)} — ${quotationStatusBadge(p.quotationStatus||"draft")}</span>
-          <span style="color:var(--slate);font-size:11.5px;white-space:nowrap;">${p.quotationUpdatedAt ? fmtDate(p.quotationUpdatedAt.slice(0,10)) : ""}</span>
-        </div>`).join("")}
-      </div>
-    </div>` : ""}
-  `;
-}
-
-function attachQuotationsOverviewHandlers(){
-  const searchEl = document.getElementById("quotationsSearchInput");
-  if(searchEl) searchEl.oninput = (e)=>{
-    state.quotationsSearch = e.target.value;
-    const selStart = e.target.selectionStart, selEnd = e.target.selectionEnd;
-    render();
-    const s2 = document.getElementById("quotationsSearchInput");
-    if(s2){ s2.focus(); try{ s2.setSelectionRange(selStart, selEnd); }catch(err){} }
-  };
-  const filterEl = document.getElementById("quotationsStatusFilterSelect");
-  if(filterEl) filterEl.onchange = (e)=>{ state.quotationsStatusFilter = e.target.value; render(); };
-  const sortEl = document.getElementById("quotationsSortSelect");
-  if(sortEl) sortEl.onchange = (e)=>{ state.quotationsSort = e.target.value; render(); };
-
-  document.querySelectorAll("[data-status-card]").forEach(card=>{
-    card.addEventListener("click", ()=>{
-      state.quotationsStatusFilter = card.dataset.statusCard;
-      render();
-    });
-  });
-
-  document.querySelectorAll("[data-open-quote]").forEach(card=>{
-    card.addEventListener("click", async ()=>{
-      const projectId = card.dataset.openQuote;
-      state.screen = "quotation";
-      state.quotationProjectId = projectId;
-      state.quotation = null;
-      render();
-      await loadQuotation(projectId);
-    });
-  });
-}
-
 function renderStudio(){
-  const liveProjects = state.projects.filter(p=>p.status !== "Lost");
+  const liveProjects = state.projects.filter(p=>p.status !== "Lost" && p.status !== "Completed");
   const lostProjects = state.projects.filter(p=>p.status === "Lost");
-  const section = state.section === "lost" ? "lost" : "live";
-  const sectionProjects = section === "lost" ? lostProjects : liveProjects;
+  const completedProjects = state.projects.filter(p=>p.status === "Completed");
+  const section = (state.section === "lost" || state.section === "completed") ? state.section : "live";
+  const sectionProjects = section === "lost" ? lostProjects : (section === "completed" ? completedProjects : liveProjects);
 
   let list = sectionProjects.filter(p=>{
     const matchesSearch = !state.search || (p.projectName+p.clientName+p.propertyAddress).toLowerCase().includes(state.search.toLowerCase());
@@ -3594,6 +3518,7 @@ function renderStudio(){
     <div class="section-tabs">
       <button type="button" class="section-tab ${section==="live"?"active":""}" data-section="live">Live<span class="count">${liveProjects.length}</span></button>
       <button type="button" class="section-tab lost ${section==="lost"?"active":""}" data-section="lost">Lost<span class="count">${lostProjects.length}</span></button>
+      <button type="button" class="section-tab completed ${section==="completed"?"active":""}" data-section="completed">Completed<span class="count">${completedProjects.length}</span></button>
     </div>`;
 
   const toolbar = `
@@ -3605,8 +3530,7 @@ function renderStudio(){
         ${STAGES.map(s=>`<option value="${s}" ${state.filter===s?"selected":""}>${s}</option>`).join("")}
       </select>` : ""}
       <button class="btn ghost" id="designerProfilesBtn">Designer Profiles</button>
-      <button class="btn ghost" id="quotationsOverviewBtn">Quotations</button>
-      <button class="btn ghost" id="amcRequestsBtn">AMC Requests${(()=>{ const openCount = state.amcRequests.filter(r=>r.status==="Open").length; return openCount ? ` (${openCount})` : ""; })()}</button>
+      ${section==="completed" ? `<button class="btn ghost" id="amcRequestsBtn">AMC Requests${(()=>{ const openCount = state.amcRequests.filter(r=>r.status==="Open").length; return openCount ? ` (${openCount})` : ""; })()}</button>` : ""}
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
 
@@ -3618,7 +3542,8 @@ function renderStudio(){
       </div>`;
   }
   if(list.length === 0){
-    return tabs + toolbar + `<div class="empty">${section==="lost" ? "No lost projects." : "No projects match your search."}</div>`;
+    const emptyMsg = section==="lost" ? "No lost projects." : (section==="completed" ? "No completed projects yet." : "No projects match your search.");
+    return tabs + toolbar + `<div class="empty">${emptyMsg}</div>`;
   }
 
   const cards = list.map(p=>{
@@ -4916,6 +4841,7 @@ function renderModal(){
       state.screen = "productionUpdates";
       state.productionUpdatesProjectId = projectId;
       state.showAddServicePicker = false;
+      state.pendingServiceForStage = null;
       render();
       const p = state.projects.find(x=>x.id===projectId);
       await loadProductionUpdateImages(p);
@@ -5224,12 +5150,6 @@ function attachStudioHandlers(){
     if(!state.designersLoaded){ await loadDesigners(); render(); }
   };
 
-  const qOverviewBtn = document.getElementById("quotationsOverviewBtn");
-  if(qOverviewBtn) qOverviewBtn.onclick = ()=>{
-    state.screen = "quotationsOverview";
-    render();
-  };
-
   const amcBtn = document.getElementById("amcRequestsBtn");
   if(amcBtn) amcBtn.onclick = async ()=>{
     state.screen = "amcRequests";
@@ -5312,6 +5232,7 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
     state.screen = "main";
     state.productionUpdatesProjectId = null;
     state.showAddServicePicker = false;
+    state.pendingServiceForStage = null;
     render();
     return;
   }
@@ -5328,11 +5249,6 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
     state.confirmDeleteDesigner = null;
     render();
     if(designerModalWasOpen) popEditHistoryIfNeeded();
-    return;
-  }
-  if(state.screen === "quotationsOverview"){
-    state.screen = "main";
-    render();
     return;
   }
   if(state.screen === "presets"){

@@ -793,7 +793,10 @@ function renderProductionUpdatesForClient(p){
     return `
     <div style="padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-        <span style="display:inline-block;padding:4px 10px;border-radius:20px;background:${color};color:#fff;font-size:11.5px;font-weight:600;letter-spacing:0.3px;">${escapeHtml(u.service)}</span>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="display:inline-block;padding:4px 10px;border-radius:20px;background:${color};color:#fff;font-size:11.5px;font-weight:600;letter-spacing:0.3px;">${escapeHtml(u.service)}</span>
+          ${u.stage ? `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:#f4f2ee;color:var(--ink);font-size:11.5px;font-weight:600;letter-spacing:0.3px;border:1px solid var(--line);">${escapeHtml(u.stage)}</span>` : ""}
+        </div>
         <span style="font-size:11.5px;color:var(--slate);">${escapeHtml(fmtDate((u.createdAt||"").slice(0,10)))}</span>
       </div>
       ${u.note ? `<div style="font-size:13.5px;line-height:1.6;margin-top:10px;">${escapeHtml(u.note)}</div>` : ""}
