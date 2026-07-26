@@ -61,7 +61,7 @@
   .section-tab.lost.active{border-bottom-color:#A33D3D;}
   .section-tab.lost.active .count{background:#A33D3D;}
   .toolbar input[type=text], .toolbar select{
-    font-family:'IBM Plex Sans',sans-serif;font-size:14px;
+    font-family:'IBM Plex Sans',sans-serif;font-size:16px;
     border:1px solid var(--line);background:#fff;border-radius:6px;padding:10px 12px;color:var(--ink);
   }
   .toolbar input[type=text]{flex:1;min-width:180px;}
@@ -139,8 +139,8 @@
   .field.full{grid-column:1/-1;}
   label{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);}
   input, select, textarea{
-    font-family:'IBM Plex Sans',sans-serif;font-size:14px;border:1px solid var(--line);border-radius:6px;
-    padding:9px 11px;background:#fff;color:var(--ink);width:100%;
+    font-family:'IBM Plex Sans',sans-serif;font-size:16px;border:1px solid var(--line);border-radius:6px;
+    padding:8px 11px;background:#fff;color:var(--ink);width:100%;
   }
   textarea{resize:vertical;min-height:60px;}
   .section-label{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--brass);margin:20px 0 10px;padding-top:14px;border-top:1px solid var(--line);}
@@ -198,7 +198,7 @@
   }
   .quote-table td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle;}
   .quote-table tr:last-child td{border-bottom:none;}
-  .quote-table input, .quote-table select{font-size:13px;padding:7px 8px;}
+  .quote-table input, .quote-table select{font-size:16px;padding:7px 8px;}
   .quote-amt{font-family:'IBM Plex Mono',monospace;font-size:13.5px;white-space:nowrap;text-align:right;padding-right:10px;}
   .quote-remove{background:none;border:none;color:var(--slate);cursor:pointer;font-size:15px;padding:4px;}
   .quote-remove:hover{color:var(--clay);}
@@ -207,7 +207,7 @@
   .quote-row{display:flex;justify-content:space-between;align-items:center;font-size:13.5px;padding:6px 0;}
   .quote-row.total{border-top:1px solid var(--line);margin-top:6px;padding-top:12px;font-family:'Fraunces',serif;font-size:19px;}
   .quote-row label{font-family:'IBM Plex Sans',sans-serif;text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink);}
-  .quote-row input{width:70px;text-align:right;padding:5px 7px;font-size:13px;}
+  .quote-row input{width:70px;text-align:right;padding:5px 7px;font-size:16px;}
   .quote-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;}
 
   /* ---- Quotation Item Card (Product / Features / Dimensions, descending) ---- */
@@ -221,7 +221,7 @@
   }
   .item-card .qi-features{font-size:13.5px;padding:8px 10px;width:100%;min-height:44px;}
   .dim-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-  .dim-row input{width:80px;font-size:13px;padding:7px 8px;}
+  .dim-row input{width:80px;font-size:16px;padding:7px 8px;}
   .dim-row select{width:100px;font-size:13px;padding:7px 8px;}
   .dim-x{color:var(--slate);font-size:13px;}
   .dim-result{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--sage);margin-left:4px;}
@@ -260,7 +260,7 @@
   .preset-table td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top;}
   .preset-table tr:last-child td{border-bottom:none;}
   .preset-table textarea{font-size:13px;padding:7px 8px;min-height:44px;}
-  .preset-table input, .preset-table select{font-size:13px;padding:7px 8px;}
+  .preset-table input, .preset-table select{font-size:16px;padding:7px 8px;}
   .link-btn{background:none;border:none;color:var(--brass);font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;padding:0;text-decoration:underline;}
   .link-btn:hover{color:var(--ink);}
 
@@ -286,6 +286,14 @@
   .access-gate-card .btn{display:inline-block;background:var(--ink);color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;border:none;cursor:pointer;transition:background .15s;}
   .access-gate-card .btn:hover{background:var(--ink-2);}
   .access-gate-note{font-size:12px;color:var(--slate);margin-top:16px;}
+  /* iOS Safari zooms the whole page in whenever a focused input's
+     computed font-size is under 16px — several tables here use 13-14px
+     inputs for density, which is what causes the page to jump/zoom when
+     the keyboard opens on a phone. Force 16px on small screens only, so
+     desktop density is unaffected. */
+  @media (max-width: 768px){
+    input, select, textarea{ font-size:16px !important; }
+  }
 </style>
 </head>
 <body>
@@ -696,7 +704,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent", reportsLoaded: false, reportsData: null };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -1498,20 +1506,39 @@ async function generateQuotationPdf(project, quotation){
   }
 
   if(quotation.notes){
-    if(y + 50 > pageHeight - 50){ doc.addPage(); y = 50; }
-    doc.setDrawColor(LINE[0],LINE[1],LINE[2]);
-    doc.setFillColor(255,255,255);
-    const split = doc.splitTextToSize(quotation.notes, pageWidth - margin*2 - 24);
-    const notesBoxH = 30 + split.length * 13;
-    doc.roundedRect(margin, y, pageWidth - margin*2, notesBoxH, 4, 4, "FD");
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(10);
-    doc.setTextColor(BRASS[0],BRASS[1],BRASS[2]);
-    doc.text("NOTES", margin + 12, y + 16);
-    doc.setFont("helvetica","normal");
-    doc.setTextColor(20,20,20);
-    doc.text(split, margin + 12, y + 30);
-    y += notesBoxH + 28;
+    const notesWidth = pageWidth - margin*2 - 24;
+    const allLines = doc.splitTextToSize(quotation.notes, notesWidth);
+    const lineH2 = 13;
+    const boxPad = 30;      // space above the first line of text inside the box
+    const boxBottomPad = 14; // breathing room below the last line
+    let lineIdx = 0;
+    let firstChunk = true;
+    while(lineIdx < allLines.length){
+      const spaceLeft = pageHeight - 50 - y;
+      const minBoxH = boxPad + lineH2 + boxBottomPad; // room for at least 1 line
+      if(spaceLeft < minBoxH){
+        doc.addPage();
+        y = 50;
+        continue;
+      }
+      const maxLinesThisPage = Math.max(1, Math.floor((spaceLeft - boxPad - boxBottomPad) / lineH2));
+      const chunk = allLines.slice(lineIdx, lineIdx + maxLinesThisPage);
+      const notesBoxH = boxPad + chunk.length * lineH2 + boxBottomPad - lineH2;
+      doc.setDrawColor(LINE[0],LINE[1],LINE[2]);
+      doc.setFillColor(255,255,255);
+      doc.roundedRect(margin, y, pageWidth - margin*2, notesBoxH, 4, 4, "FD");
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(10);
+      doc.setTextColor(BRASS[0],BRASS[1],BRASS[2]);
+      doc.text(firstChunk ? "NOTES" : "NOTES (cont'd)", margin + 12, y + 16);
+      doc.setFont("helvetica","normal");
+      doc.setTextColor(20,20,20);
+      doc.text(chunk, margin + 12, y + 30);
+      y += notesBoxH + 28;
+      lineIdx += chunk.length;
+      firstChunk = false;
+      if(lineIdx < allLines.length){ doc.addPage(); y = 50; }
+    }
   }
 
   // --- QR code (links to the client portal) + signature / seal block ---
@@ -3370,7 +3397,7 @@ function render(){
 
   const headerBack = document.getElementById("headerBack");
   const headerCrmLink = document.getElementById("headerCrmLink");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "productionUpdates" || state.screen === "amcRequests" || state.screen === "quotationsOverview" || state.screen === "reports"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "productionUpdates" || state.screen === "amcRequests" || state.screen === "quotationsOverview"){
     headerBack.style.display = "inline-block";
     if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
@@ -3395,12 +3422,6 @@ function render(){
   if(state.screen === "quotationsOverview"){
     main.innerHTML = renderQuotationsOverview();
     attachQuotationsOverviewHandlers();
-    return;
-  }
-
-  if(state.screen === "reports"){
-    main.innerHTML = renderReports();
-    attachReportsHandlers();
     return;
   }
 
@@ -3443,139 +3464,6 @@ function render(){
   if(state.editing !== null){
     renderModal();
   }
-}
-
-async function loadReportsData(){
-  const withQuotes = state.projects.filter(p=>p.quotationNumber);
-  if(!state.designersLoaded) await loadDesigners();
-
-  const fetched = await Promise.all(withQuotes.map(p=>
-    window.storage.get("quotation:" + p.id, true).catch(()=>null)
-  ));
-  const quotationsByProjectId = {};
-  fetched.forEach((res,i)=>{
-    if(res && res.value){
-      try{ quotationsByProjectId[withQuotes[i].id] = JSON.parse(res.value); }catch(e){ /* skip unreadable record */ }
-    }
-  });
-
-  const totalQuotationValue = withQuotes.reduce((s,p)=> s + (Number(p.quotationGrandTotal)||0), 0);
-  const convertedCount = withQuotes.filter(p=>p.quotationStatus==="converted").length;
-  const conversionRate = withQuotes.length ? (convertedCount / withQuotes.length) * 100 : 0;
-  const revenueForecast = withQuotes.filter(p=>p.quotationStatus==="sent" || p.quotationStatus==="approved").reduce((s,p)=> s + (Number(p.quotationGrandTotal)||0), 0);
-
-  const materialCounts = {};
-  Object.values(quotationsByProjectId).forEach(q=>{
-    (q.items||[]).forEach(it=>{
-      if(!it.brand) return;
-      materialCounts[it.brand] = (materialCounts[it.brand]||0) + 1;
-    });
-  });
-  const topMaterials = Object.entries(materialCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
-
-  const designerStats = {};
-  withQuotes.forEach(p=>{
-    const key = p.assignedDesignerId || "unassigned";
-    if(!designerStats[key]) designerStats[key] = { count:0, value:0, converted:0 };
-    designerStats[key].count++;
-    designerStats[key].value += Number(p.quotationGrandTotal)||0;
-    if(p.quotationStatus === "converted") designerStats[key].converted++;
-  });
-  const designerPerformance = Object.entries(designerStats).map(([id, stats])=>{
-    const designer = (state.designers||[]).find(d=>d.id===id);
-    return {
-      name: designer ? designer.name : "Unassigned",
-      count: stats.count, value: stats.value, converted: stats.converted,
-      conversionRate: stats.count ? (stats.converted / stats.count) * 100 : 0
-    };
-  }).sort((a,b)=>b.value-a.value);
-
-  const monthly = {};
-  withQuotes.forEach(p=>{
-    if(!p.quotationUpdatedAt) return;
-    const key = p.quotationUpdatedAt.slice(0,7); // YYYY-MM
-    if(!monthly[key]) monthly[key] = { count:0, value:0 };
-    monthly[key].count++;
-    monthly[key].value += Number(p.quotationGrandTotal)||0;
-  });
-  const monthlyTrends = Object.entries(monthly).sort((a,b)=>a[0]<b[0]?-1:1).slice(-6);
-
-  state.reportsData = { totalQuotationValue, conversionRate, revenueForecast, topMaterials, designerPerformance, monthlyTrends, totalQuotes: withQuotes.length };
-  state.reportsLoaded = true;
-}
-
-function renderReports(){
-  if(!state.reportsLoaded || !state.reportsData){
-    return `<div class="quote-header"><div class="eyebrow mono">Quotation Builder</div><h1>Reports</h1></div><div class="empty">Loading report data…</div>`;
-  }
-  const r = state.reportsData;
-  const maxMonthValue = Math.max(1, ...r.monthlyTrends.map(([,v])=>v.value));
-  const maxMaterialCount = Math.max(1, ...r.topMaterials.map(([,c])=>c));
-
-  return `
-    <div class="quote-header">
-      <div class="eyebrow mono">Quotation Builder</div>
-      <h1>Reports</h1>
-      <div class="sub">Based on ${r.totalQuotes} quotation${r.totalQuotes===1?"":"s"} across all projects</div>
-    </div>
-
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:28px;">
-      <div class="card"><div class="fact-label">Total Quotation Value</div><div class="display" style="font-size:22px;margin-top:6px;">${fmtMoney(r.totalQuotationValue)}</div></div>
-      <div class="card"><div class="fact-label">Conversion Rate</div><div class="display" style="font-size:22px;margin-top:6px;">${r.conversionRate.toFixed(1)}%</div></div>
-      <div class="card"><div class="fact-label">Revenue Forecast (Sent + Approved)</div><div class="display" style="font-size:22px;margin-top:6px;">${fmtMoney(r.revenueForecast)}</div></div>
-    </div>
-
-    <div class="section-label">Monthly Trends (Last 6 Months)</div>
-    ${r.monthlyTrends.length ? r.monthlyTrends.map(([month, v])=>`
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-        <div style="width:70px;font-size:12px;color:var(--slate);flex-shrink:0;">${escapeHtml(month)}</div>
-        <div style="flex:1;background:var(--paper-2);border-radius:4px;overflow:hidden;height:20px;">
-          <div style="width:${(v.value/maxMonthValue*100).toFixed(1)}%;background:var(--brass);height:100%;"></div>
-        </div>
-        <div style="width:140px;font-size:12px;text-align:right;flex-shrink:0;">${fmtMoney(v.value)} · ${v.count} quote${v.count===1?"":"s"}</div>
-      </div>`).join("") : `<div class="empty">No dated quotations yet.</div>`}
-
-    <div class="section-label" style="margin-top:24px;">Most Selected Materials / Brands</div>
-    ${r.topMaterials.length ? r.topMaterials.map(([brand, count])=>`
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-        <div style="width:160px;font-size:12.5px;flex-shrink:0;">${escapeHtml(brand)}</div>
-        <div style="flex:1;background:var(--paper-2);border-radius:4px;overflow:hidden;height:16px;">
-          <div style="width:${(count/maxMaterialCount*100).toFixed(1)}%;background:var(--sage);height:100%;"></div>
-        </div>
-        <div style="width:70px;font-size:12px;text-align:right;flex-shrink:0;">${count} item${count===1?"":"s"}</div>
-      </div>`).join("") : `<div class="empty">No line items with a Brand/Material set yet.</div>`}
-
-    <div class="section-label" style="margin-top:24px;">Designer Performance</div>
-    ${r.designerPerformance.length ? `
-    <div class="grid">
-      ${r.designerPerformance.map(d=>`
-        <div class="card">
-          <div class="card-title" style="font-size:16px;">${escapeHtml(d.name)}</div>
-          <div class="facts">
-            <div><div class="fact-label">Quotations</div><div class="fact-val">${d.count}</div></div>
-            <div><div class="fact-label">Total Value</div><div class="fact-val">${fmtMoney(d.value)}</div></div>
-            <div><div class="fact-label">Converted</div><div class="fact-val">${d.converted}</div></div>
-            <div><div class="fact-label">Conversion Rate</div><div class="fact-val">${d.conversionRate.toFixed(1)}%</div></div>
-          </div>
-        </div>`).join("")}
-    </div>` : `<div class="empty">No quotations yet.</div>`}
-
-    <div style="margin-top:24px;font-size:12px;color:var(--slate);">Sales Performance and Lead Source reports aren't shown here — the project record doesn't currently capture a sales executive or lead source field. Add those fields to the project form first and this report can be extended to cover them.</div>
-
-    <div class="quote-actions" style="margin-top:20px;">
-      <button type="button" class="btn ghost" id="refreshReportsBtn">↻ Refresh</button>
-    </div>
-  `;
-}
-
-function attachReportsHandlers(){
-  const refreshBtn = document.getElementById("refreshReportsBtn");
-  if(refreshBtn) refreshBtn.onclick = async ()=>{
-    state.reportsLoaded = false;
-    render();
-    await loadReportsData();
-    render();
-  };
 }
 
 function renderQuotationsOverview(){
@@ -3718,7 +3606,6 @@ function renderStudio(){
       </select>` : ""}
       <button class="btn ghost" id="designerProfilesBtn">Designer Profiles</button>
       <button class="btn ghost" id="quotationsOverviewBtn">Quotations</button>
-      <button class="btn ghost" id="reportsBtn">Reports</button>
       <button class="btn ghost" id="amcRequestsBtn">AMC Requests${(()=>{ const openCount = state.amcRequests.filter(r=>r.status==="Open").length; return openCount ? ` (${openCount})` : ""; })()}</button>
       <button class="btn" id="newProjectBtn">+ New Project</button>
     </div>`;
@@ -4005,7 +3892,7 @@ function paymentVerificationInnerHtml(p){
          <button type="button" class="btn" id="verifyPaymentBtn" data-id="${p.id}">✓ Verify Payment</button>
          <button type="button" class="btn ghost" id="rejectPaymentBtn" data-id="${p.id}">✗ Reject</button>
        </div>
-       <input type="text" id="paymentRejectionNoteInput" placeholder="Reason for rejection (shown to client)" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:13px;">
+       <input type="text" id="paymentRejectionNoteInput" placeholder="Reason for rejection (shown to client)" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:16px;">
        <div id="paymentProofPreview" style="margin-top:10px;"></div>`
     : p.paymentStatus === "rejected"
     ? `<div style="color:#a33d3d;margin-bottom:8px;">✗ Payment proof was rejected on ${escapeHtml((p.paymentVerifiedAt||"").slice(0,10))}. Reason given to client: ${escapeHtml(p.paymentRejectionNote||"—")}</div>
@@ -4096,7 +3983,7 @@ function productionPaymentVerificationInnerHtml(p){
          <button type="button" class="btn" id="verifyProductionPaymentBtn" data-id="${p.id}">✓ Verify Payment</button>
          <button type="button" class="btn ghost" id="rejectProductionPaymentBtn" data-id="${p.id}">✗ Reject</button>
        </div>
-       <input type="text" id="productionPaymentRejectionNoteInput" placeholder="Reason for rejection (shown to client)" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:13px;">
+       <input type="text" id="productionPaymentRejectionNoteInput" placeholder="Reason for rejection (shown to client)" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:16px;">
        <div id="productionPaymentProofPreview" style="margin-top:10px;"></div>`
     : p.productionPaymentStatus === "rejected"
     ? `<div style="color:#a33d3d;margin-bottom:8px;">✗ Payment proof was rejected on ${escapeHtml((p.productionPaymentVerifiedAt||"").slice(0,10))}. Reason given to client: ${escapeHtml(p.productionPaymentRejectionNote||"—")}</div>
@@ -4307,17 +4194,6 @@ function renderAmcRequests(){
     state.amcSelectedId = null;
   }
 
-  const priceBox = `
-    <div class="portal-box" style="max-width:420px;margin-bottom:18px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;">
-      <div style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--slate);margin-bottom:8px;">AMC Plan Price</div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span style="font-size:14px;">₹</span>
-        <input type="number" id="amcPlanPriceInput" min="0" step="1" value="${escapeAttr(state.amcPlanPrice || "")}" placeholder="e.g. 15499" style="flex:1;">
-        <button type="button" class="btn" id="amcPlanPriceSaveBtn">Save</button>
-      </div>
-      <div style="font-size:12px;color:var(--slate);margin-top:6px;">Shown to clients on the AMC Plan page and used as the Cashfree payment amount when they activate.</div>
-    </div>`;
-
   const filter = state.amcStatusFilter || "all";
   const list = (state.amcRequests||[]).filter(r=> filter==="all" || r.status===filter);
   const sorted = [...list].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
@@ -4332,7 +4208,7 @@ function renderAmcRequests(){
     </div>`;
 
   if(!sorted.length){
-    return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + priceBox + toolbar + `
+    return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + toolbar + `
       <div class="empty">
         <div class="display">No service requests${filter!=="all" ? ` with status "${escapeHtml(filter)}"` : ""}</div>
         <div>Requests clients raise from their portal will show up here.</div>
@@ -4356,7 +4232,7 @@ function renderAmcRequests(){
       </div>
     </div>`).join("");
 
-  return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + priceBox + toolbar + `<div class="grid">${cards}</div>`;
+  return `<div class="display" style="font-size:22px;margin-bottom:14px;">AMC Requests</div>` + toolbar + `<div class="grid">${cards}</div>`;
 }
 
 function renderAmcDetail(ticket){
@@ -4417,27 +4293,6 @@ function renderAmcDetail(ticket){
 }
 
 function attachAmcRequestsHandlers(){
-  const priceSaveBtn = document.getElementById("amcPlanPriceSaveBtn");
-  if(priceSaveBtn){
-    priceSaveBtn.onclick = async ()=>{
-      const input = document.getElementById("amcPlanPriceInput");
-      const value = Number(input.value);
-      if(isNaN(value) || value < 0){
-        showToast("Please enter a valid price.", true);
-        return;
-      }
-      priceSaveBtn.disabled = true;
-      priceSaveBtn.textContent = "Saving…";
-      const ok = await saveAmcPlanPrice(value);
-      if(ok){
-        state.amcPlanPrice = value;
-        showToast("AMC plan price saved.", false);
-      }
-      priceSaveBtn.disabled = false;
-      priceSaveBtn.textContent = "Save";
-    };
-  }
-
   const filterSelect = document.getElementById("amcStatusFilterSelect");
   if(filterSelect) filterSelect.onchange = (e)=>{ state.amcStatusFilter = e.target.value; render(); };
 
@@ -4915,6 +4770,19 @@ function renderModal(){
         <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Post progress photos and notes (Modular Furniture, Civil Work, Painting) for the client to see during Production.</div>
         <button type="button" class="btn ghost" id="openProductionUpdatesBtn" data-id="${p.id}">Open Production Updates →</button>` : ""}
 
+        ${p.status === "Completed" ? `
+        <div class="section-label" style="margin-top:22px;">AMC Plan Price</div>
+        <div style="font-size:12px;color:var(--slate);margin:-4px 0 8px;">Shown to clients on the AMC Plan page and used as the Cashfree payment amount when they activate. This is one shared price used for every client's AMC plan.</div>
+        <div class="field-row">
+          <div class="field" style="max-width:260px;">
+            <div style="display:flex;gap:8px;align-items:center;">
+              <span style="font-size:14px;">₹</span>
+              <input type="number" id="amcPlanPriceInput" min="0" step="1" value="${escapeAttr(state.amcPlanPrice || "")}" placeholder="e.g. 15499" style="flex:1;">
+              <button type="button" class="btn" id="amcPlanPriceSaveBtn">Save</button>
+            </div>
+          </div>
+        </div>` : ""}
+
         ${!isNew ? `
         <div class="section-label">Client Progress</div>
         <div class="field-row">
@@ -5052,6 +4920,26 @@ function renderModal(){
       const p = state.projects.find(x=>x.id===projectId);
       await loadProductionUpdateImages(p);
       render();
+    };
+  }
+  const amcPlanPriceSaveBtn = document.getElementById("amcPlanPriceSaveBtn");
+  if(amcPlanPriceSaveBtn){
+    amcPlanPriceSaveBtn.onclick = async ()=>{
+      const input = document.getElementById("amcPlanPriceInput");
+      const value = Number(input.value);
+      if(isNaN(value) || value < 0){
+        showToast("Please enter a valid price.", true);
+        return;
+      }
+      amcPlanPriceSaveBtn.disabled = true;
+      amcPlanPriceSaveBtn.textContent = "Saving…";
+      const ok = await saveAmcPlanPrice(value);
+      if(ok){
+        state.amcPlanPrice = value;
+        showToast("AMC plan price saved.", false);
+      }
+      amcPlanPriceSaveBtn.disabled = false;
+      amcPlanPriceSaveBtn.textContent = "Save";
     };
   }
   const openQuoteBtnForFinal = document.getElementById("openQuoteBtnForFinal");
@@ -5342,13 +5230,6 @@ function attachStudioHandlers(){
     render();
   };
 
-  const reportsBtn = document.getElementById("reportsBtn");
-  if(reportsBtn) reportsBtn.onclick = async ()=>{
-    state.screen = "reports";
-    render();
-    if(!state.reportsLoaded){ await loadReportsData(); render(); }
-  };
-
   const amcBtn = document.getElementById("amcRequestsBtn");
   if(amcBtn) amcBtn.onclick = async ()=>{
     state.screen = "amcRequests";
@@ -5450,11 +5331,6 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
     return;
   }
   if(state.screen === "quotationsOverview"){
-    state.screen = "main";
-    render();
-    return;
-  }
-  if(state.screen === "reports"){
     state.screen = "main";
     render();
     return;
