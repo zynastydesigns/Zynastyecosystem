@@ -706,7 +706,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, pendingServiceForStage: null, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, pendingServiceForStage: null, serviceManagementProjectId: null, openStageMenuServiceId: null, showAddServiceModal: false, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -822,7 +822,7 @@ async function saveProjects(excludeIds){
   // the same protection from the merge below, or they'd be silently
   // overwritten by a stale fetch (this was the root cause of Design Studio
   // uploads/edits not sticking).
-  const protectedIds = new Set([state.editing, state.designStudioProjectId, state.quotationProjectId, state.productionUpdatesProjectId].filter(Boolean));
+  const protectedIds = new Set([state.editing, state.designStudioProjectId, state.quotationProjectId, state.productionUpdatesProjectId, state.serviceManagementProjectId].filter(Boolean));
   try{
     // Before overwriting the whole shared "projects" blob, pull the latest
     // copy and merge it in for every project OTHER than the one(s) currently
@@ -2000,6 +2000,125 @@ const PRODUCTION_UPDATE_STAGES = {
   "Civil Work": ["Framing & Wiring", "Gypsum Board Installation", "Painting"]
 };
 
+// ---------------------------------------------------------------------
+// Service Management (new). Replaces the "+ Add Service" stage-picker
+// flow above with a per-project `services` array: each service carries
+// its own fixed stage track (picked once, at creation) and the studio
+// changes progress by moving a single dropdown on the card — no more
+// configuring stages inside a settings screen. Stored as `p.services`,
+// a brand new field, so it does not touch `p.productionUpdates` or any
+// other existing column.
+// ---------------------------------------------------------------------
+const SERVICE_TYPES = {
+  "civil-work": {
+    label: "Civil Work",
+    stages: [
+      { id:"sourcing", label:"Sourcing",                  color:"#A9814F", about:"We're sourcing the materials for the false ceiling." },
+      { id:"framing",  label:"Framing & Wiring",           color:"#7D6B96", about:"Framing and electrical wiring are underway." },
+      { id:"gypsum",   label:"Gypsum Board Installation",  color:"#3E6E96", about:"Gypsum boards are being installed." },
+      { id:"painting", label:"Painting",                   color:"#6E7D5E", about:"Final painting is in progress." },
+    ]
+  },
+  "demolition": {
+    label: "Demolition",
+    stages: [
+      { id:"ongoing",  label:"Ongoing",  color:"#A9814F", about:"Demolition work is currently underway on site." },
+      { id:"complete", label:"Complete", color:"#6E7D5E", about:"Demolition is complete." },
+    ]
+  },
+  "modular-furniture": {
+    label: "Modular Furniture",
+    stages: [
+      { id:"sourcing",      label:"Sourcing",       color:"#A9814F", about:"We're sourcing the materials and components for this service." },
+      { id:"quality",       label:"Quality Check",  color:"#7D6B96", about:"Everything is being inspected against spec before moving on." },
+      { id:"manufacturing", label:"Manufacturing",  color:"#3E6E96", about:"Your items are in production, built with precision and care." },
+      { id:"dispatch",      label:"Dispatch",       color:"#6E7D5E", about:"Ready and being dispatched to the project site." },
+    ]
+  }
+};
+function ensureServices(p){
+  if(!Array.isArray(p.services)) p.services = [];
+  return p.services;
+}
+function stagesForServiceType(type){ return (SERVICE_TYPES[type] || SERVICE_TYPES["modular-furniture"]).stages; }
+function stageIndexOf(type, stageId){ return stagesForServiceType(type).findIndex(s=>s.id===stageId); }
+function newServiceId(){ return "svc_" + Date.now() + "_" + Math.floor(Math.random()*10000); }
+function timeAgoLabel(iso){
+  if(!iso) return "—";
+  const m = Math.round((Date.now() - new Date(iso).getTime())/60000);
+  if(m < 1) return "Just now";
+  if(m < 60) return m + "m ago";
+  const h = Math.round(m/60);
+  if(h < 24) return h + "h ago";
+  return Math.round(h/24) + "d ago";
+}
+
+// -----------------------------------------------------------------------
+// One-time migration: builds `services` records out of a project's
+// existing `productionUpdates` feed. Never touches or deletes
+// productionUpdates — it only reads it. Safe to run more than once since
+// the caller only offers it while p.services is still empty, but the
+// function itself doesn't check that, so don't call it on a project that
+// already has real service records or it will duplicate them.
+// -----------------------------------------------------------------------
+function migrateProductionUpdatesToServices(p){
+  const updates = p.productionUpdates || [];
+  if(!updates.length) return [];
+
+  const byService = { "Modular Furniture": [], "Civil Work": [], "Painting": [] };
+  updates.forEach(u=>{ if(byService[u.service]) byService[u.service].push(u); });
+  const latestOf = list => list.slice().sort((a,b)=>new Date(a.createdAt||0)-new Date(b.createdAt||0)).pop();
+  const designer = p.designerName || "Unassigned";
+  const nowIso = new Date().toISOString();
+  const built = [];
+
+  // Modular Furniture: old stages were Materials -> Manufacturing -> Shipping,
+  // with Materials gated on per-photo approval. Map onto the new
+  // sourcing -> quality -> manufacturing -> dispatch track.
+  if(byService["Modular Furniture"].length){
+    const furnUpdates = byService["Modular Furniture"];
+    const hasShipping = furnUpdates.some(u=>u.stage==="Shipping");
+    const hasManufacturing = furnUpdates.some(u=>u.stage==="Manufacturing");
+    const materialsApproved = getFurnitureMaterialsStatus(p) === "approved";
+    let stage = "sourcing";
+    if(hasShipping) stage = "dispatch";
+    else if(hasManufacturing) stage = "manufacturing";
+    else if(materialsApproved) stage = "quality";
+    const latest = latestOf(furnUpdates);
+    built.push({
+      id: newServiceId(), name: "Modular Furniture", type: "modular-furniture",
+      icon: "🛋️", color: "#A9814F", stage, designer,
+      updatedAt: (latest && latest.createdAt) || nowIso
+    });
+  }
+
+  // Civil Work + the old standalone Painting service both fold into one
+  // civil-work record now that Painting is its final stage rather than
+  // its own service. Whichever gives the more advanced stage wins.
+  if(byService["Civil Work"].length || byService["Painting"].length){
+    const civilMap = { "Framing & Wiring":"framing", "Gypsum Board Installation":"gypsum", "Painting":"painting" };
+    const civilUpdates = byService["Civil Work"];
+    const latestCivil = latestOf(civilUpdates);
+    let stage = latestCivil && civilMap[latestCivil.stage] ? civilMap[latestCivil.stage] : "sourcing";
+    let updatedAt = (latestCivil && latestCivil.createdAt) || nowIso;
+    if(byService["Painting"].length){
+      const latestPaint = latestOf(byService["Painting"]);
+      // Standalone Painting updates are always later in the flow than
+      // Sourcing/Framing/Gypsum, so they win whenever present.
+      stage = "painting";
+      if(latestPaint && latestPaint.createdAt && new Date(latestPaint.createdAt) > new Date(updatedAt)){
+        updatedAt = latestPaint.createdAt;
+      }
+    }
+    built.push({
+      id: newServiceId(), name: "Civil Work", type: "civil-work",
+      icon: "🧱", color: "#5C6B73", stage, designer, updatedAt
+    });
+  }
+
+  return built;
+}
+
 // Modular Furniture's "Materials" stage is gated: the studio posts material
 // options (image + label) for the client to approve or disapprove one by
 // one, and the phase only reads as having moved on to Manufacturing once
@@ -2383,6 +2502,239 @@ function attachProductionUpdatesHandlers(){
     showToast(ok ? "Production updates saved. The client can see them now." : "Could not save. Please try again.", !ok);
     saveBtn.disabled = false;
     saveBtn.textContent = original;
+  };
+}
+
+// =======================================================================
+// Service Management screen — card grid, one card per service, each card
+// is its own stage control. Persists to p.services via the same atomic
+// updateStudioProject() RPC used elsewhere in this file.
+// =======================================================================
+function renderServiceManagement(){
+  const p = state.projects.find(x=>x.id===state.serviceManagementProjectId);
+  if(!p) return `<div class="empty">Project not found.</div>`;
+  const services = ensureServices(p);
+
+  const cardsHtml = services.map(svc=>{
+    const stages = stagesForServiceType(svc.type);
+    const idx = Math.max(0, stageIndexOf(svc.type, svc.stage));
+    const st = stages[idx];
+    const pct = Math.round(((idx+1)/stages.length)*100);
+    const menuOpen = state.openStageMenuServiceId === svc.id;
+    return `
+    <div class="card" style="cursor:default;border-left:3px solid ${st.color};" data-service-id="${svc.id}">
+      <div class="card-top" style="margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:38px;height:38px;border-radius:10px;background:${svc.color}22;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">${escapeHtml(svc.icon||"🔧")}</div>
+          <div>
+            <div class="card-title" style="font-size:16px;">${escapeHtml(svc.name)}</div>
+            <div class="card-client">Updated ${timeAgoLabel(svc.updatedAt)}</div>
+          </div>
+        </div>
+        <button type="button" class="icon-btn svc-delete" data-service="${svc.id}" title="Remove service">🗑</button>
+      </div>
+
+      <div style="position:relative;margin-bottom:12px;">
+        <button type="button" class="svc-stage-toggle" data-service="${svc.id}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;background:${st.color}18;border:1px solid transparent;border-radius:8px;padding:9px 11px;cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);">
+          <span style="display:flex;align-items:center;gap:8px;"><span style="width:8px;height:8px;border-radius:50%;background:${st.color};flex-shrink:0;"></span>${escapeHtml(st.label)}</span>
+          <span style="color:var(--slate);font-size:11px;">▾</span>
+        </button>
+        ${menuOpen ? `
+        <div style="position:absolute;top:calc(100% + 5px);left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 26px rgba(8,40,69,.18);padding:5px;z-index:10;">
+          ${stages.map(s=>`
+            <div class="svc-stage-option" data-service="${svc.id}" data-stage="${s.id}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;cursor:pointer;${s.id===svc.stage?'font-weight:600;':''}">
+              <span style="width:8px;height:8px;border-radius:50%;background:${s.color};flex-shrink:0;"></span>${escapeHtml(s.label)}
+              ${s.id===svc.stage?'<span style="margin-left:auto;color:var(--sage);font-size:11px;">✓</span>':''}
+            </div>`).join("")}
+        </div>` : ""}
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;height:5px;background:var(--paper-2);border-radius:8px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${st.color};border-radius:8px;transition:width .3s;"></div>
+        </div>
+        <div style="font-size:11px;color:var(--slate);width:30px;text-align:right;">${pct}%</div>
+      </div>
+
+      <div style="font-size:12px;color:var(--slate);">${escapeHtml(svc.designer || "Unassigned")}</div>
+    </div>`;
+  }).join("");
+
+  return `
+  <div class="display" style="font-size:22px;margin-bottom:4px;">Service Management</div>
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--slate);margin-bottom:18px;">${escapeHtml(p.projectName)} · ${escapeHtml(formatClientName(p))}</div>
+  <div class="toolbar">
+    <div style="flex:1;font-size:12.5px;color:var(--slate);align-self:center;">Each card is its own stage control — the client portal updates the moment you change one here.</div>
+    <button type="button" class="btn" id="svcAddBtn">+ Add Service</button>
+  </div>
+  ${services.length ? `<div class="grid">${cardsHtml}</div>` : `
+  <div class="empty">
+    <div class="display">No services yet</div>
+    <div>Tap "+ Add Service" to add the first one for this project.</div>
+    ${(p.productionUpdates||[]).length ? `
+    <div style="margin-top:14px;">
+      <button type="button" class="btn ghost" id="svcImportBtn">Import from Production Updates →</button>
+      <div style="font-size:11.5px;color:var(--slate);margin-top:6px;">Builds service cards from this project's existing update history. Nothing in Production Updates is changed or removed.</div>
+    </div>` : ""}
+  </div>`}
+  `;
+}
+
+function attachServiceManagementHandlers(){
+  const p = state.projects.find(x=>x.id===state.serviceManagementProjectId);
+  if(!p) return;
+  const services = ensureServices(p);
+
+  const addBtn = document.getElementById("svcAddBtn");
+  if(addBtn) addBtn.onclick = ()=>{
+    state.showAddServiceModal = true;
+    render();
+  };
+
+  const importBtn = document.getElementById("svcImportBtn");
+  if(importBtn) importBtn.onclick = async ()=>{
+    importBtn.disabled = true;
+    importBtn.textContent = "Importing…";
+    const built = migrateProductionUpdatesToServices(p);
+    if(!built.length){
+      showToast("Nothing to import for this project.", true);
+      importBtn.disabled = false;
+      importBtn.textContent = "Import from Production Updates →";
+      return;
+    }
+    p.services = built;
+    render();
+    const ok = await updateStudioProject(p.id, { services: p.services });
+    if(!ok){
+      showToast("Could not save the imported services. Please try again.", true);
+    } else {
+      showToast(`Imported ${built.length} service${built.length>1?"s":""} from update history`);
+    }
+  };
+
+  document.querySelectorAll(".svc-stage-toggle").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id = btn.dataset.service;
+      state.openStageMenuServiceId = state.openStageMenuServiceId === id ? null : id;
+      render();
+    });
+  });
+
+  document.querySelectorAll(".svc-stage-option").forEach(opt=>{
+    opt.addEventListener("click", async ()=>{
+      const svc = services.find(s=>s.id===opt.dataset.service);
+      if(!svc) return;
+      const stageId = opt.dataset.stage;
+      if(svc.stage === stageId){ state.openStageMenuServiceId = null; render(); return; }
+
+      const prevStage = svc.stage, prevUpdated = svc.updatedAt;
+      // Optimistic UI update — the card and the client portal read from
+      // the same `services` field, so this is the only write needed.
+      svc.stage = stageId;
+      svc.updatedAt = new Date().toISOString();
+      state.openStageMenuServiceId = null;
+      render();
+      showToast(`${svc.name} moved to ${stagesForServiceType(svc.type)[stageIndexOf(svc.type, stageId)].label}`);
+
+      const ok = await updateStudioProject(p.id, { services: p.services });
+      if(!ok){
+        svc.stage = prevStage;
+        svc.updatedAt = prevUpdated;
+        render();
+        showToast("Could not save — reverted. Please try again.", true);
+      }
+    });
+  });
+
+  document.querySelectorAll(".svc-delete").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const svc = services.find(s=>s.id===btn.dataset.service);
+      if(!svc) return;
+      if(!confirm(`Remove ${svc.name} from this project?`)) return;
+      p.services = services.filter(s=>s.id!==svc.id);
+      render();
+      const ok = await updateStudioProject(p.id, { services: p.services });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+    });
+  });
+
+  document.addEventListener("click", function closeStageMenuOnOutsideClick(e){
+    if(state.openStageMenuServiceId !== null && !e.target.closest(".svc-stage-toggle") && !e.target.closest(".svc-stage-option")){
+      state.openStageMenuServiceId = null;
+      render();
+    }
+  }, { once:true });
+
+  if(state.showAddServiceModal) renderAddServiceModal();
+}
+
+function renderAddServiceModal(){
+  const existing = document.getElementById("addServiceOverlay");
+  if(existing) existing.remove();
+  const typeOptionsHtml = Object.entries(SERVICE_TYPES).map(([key,t])=>
+    `<option value="${key}">${escapeHtml(t.label)} — ${t.stages.map(s=>s.label).join(" → ")}</option>`).join("");
+  const html = `
+  <div class="overlay" id="addServiceOverlay">
+    <div class="modal" style="max-width:420px;">
+      <h2 style="font-size:19px;">New Service</h2>
+      <div style="font-size:12.5px;color:var(--slate);margin:-10px 0 16px;">Just the essentials — the stage track comes with the type you pick.</div>
+      <div class="field" style="margin-bottom:14px;"><label>Service Name</label><input type="text" id="svcNameInput" placeholder="e.g. Modular Furniture"></div>
+      <div class="field" style="margin-bottom:14px;"><label>Service Type</label>
+        <select id="svcTypeInput">${typeOptionsHtml}</select>
+      </div>
+      <div class="field" style="margin-bottom:14px;"><label>Icon (emoji)</label><input type="text" id="svcIconInput" placeholder="🛋️" maxlength="4" style="width:70px;"></div>
+      <div class="field" style="margin-bottom:18px;"><label>Card Colour (optional)</label>
+        <div style="display:flex;gap:8px;">
+          ${["#A9814F","#B5654A","#6E7D5E","#5C6B73","#7D6B96","#3E6E96"].map((c,i)=>
+            `<div class="svc-color-opt" data-color="${c}" style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${i===0?'var(--ink)':'transparent'};" data-selected="${i===0}"></div>`).join("")}
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <button type="button" class="btn ghost" id="svcCancelBtn">Cancel</button>
+        <button type="button" class="btn" id="svcCreateBtn">Create Service</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+
+  let pickedColor = "#A9814F";
+  document.querySelectorAll(".svc-color-opt").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      pickedColor = el.dataset.color;
+      document.querySelectorAll(".svc-color-opt").forEach(e=>e.style.borderColor = "transparent");
+      el.style.borderColor = "var(--ink)";
+    });
+  });
+  document.getElementById("svcCancelBtn").onclick = ()=>{
+    state.showAddServiceModal = false;
+    document.getElementById("addServiceOverlay").remove();
+  };
+  document.getElementById("addServiceOverlay").addEventListener("click", e=>{
+    if(e.target.id === "addServiceOverlay"){
+      state.showAddServiceModal = false;
+      e.target.remove();
+    }
+  });
+  document.getElementById("svcCreateBtn").onclick = async ()=>{
+    const p = state.projects.find(x=>x.id===state.serviceManagementProjectId);
+    if(!p) return;
+    const name = document.getElementById("svcNameInput").value.trim();
+    if(!name){ showToast("Give the service a name first.", true); return; }
+    const type = document.getElementById("svcTypeInput").value;
+    const icon = document.getElementById("svcIconInput").value.trim() || "🔧";
+    const services = ensureServices(p);
+    const firstStage = SERVICE_TYPES[type].stages[0].id;
+    services.push({
+      id: newServiceId(), name, type, icon, color: pickedColor,
+      stage: firstStage, designer: p.designerName || "Unassigned",
+      updatedAt: new Date().toISOString()
+    });
+    state.showAddServiceModal = false;
+    document.getElementById("addServiceOverlay").remove();
+    render();
+    const ok = await updateStudioProject(p.id, { services: p.services });
+    if(!ok) showToast("Could not save the new service. Please try again.", true);
+    else showToast(`${name} created`);
   };
 }
 
@@ -3621,7 +3973,7 @@ function render(){
 
   const headerBack = document.getElementById("headerBack");
   const headerCrmLink = document.getElementById("headerCrmLink");
-  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "productionUpdates" || state.screen === "amcRequests"){
+  if(state.screen === "quotation" || state.screen === "presets" || state.screen === "designers" || state.screen === "designStudio" || state.screen === "productionUpdates" || state.screen === "serviceManagement" || state.screen === "amcRequests"){
     headerBack.style.display = "inline-block";
     if(headerCrmLink) headerCrmLink.style.display = "none";
   } else {
@@ -3673,6 +4025,12 @@ function render(){
   if(state.screen === "productionUpdates"){
     main.innerHTML = renderProductionUpdates();
     attachProductionUpdatesHandlers();
+    return;
+  }
+
+  if(state.screen === "serviceManagement"){
+    main.innerHTML = renderServiceManagement();
+    attachServiceManagementHandlers();
     return;
   }
 
@@ -4874,9 +5232,9 @@ function renderModal(){
           <div class="field full"><label>Production Agreement Notes</label><textarea name="contractNotes" placeholder="Terms, deposit, payment schedule…">${escapeHtml(p.contractNotes)}</textarea></div>
         </div>
 
-        <div class="section-label" style="margin-top:22px;">Production Updates</div>
-        <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Post progress photos and notes (Modular Furniture, Civil Work, Painting) for the client to see during Production.</div>
-        <button type="button" class="btn ghost" id="openProductionUpdatesBtn" data-id="${p.id}">Open Production Updates →</button>` : ""}
+        <div class="section-label" style="margin-top:22px;">Service Management</div>
+        <div style="font-size:12px;color:var(--slate);margin:-4px 0 12px;">Add services (Civil Work, Modular Furniture, Demolition) and move each one's stage from its card — the client portal updates instantly.</div>
+        <button type="button" class="btn ghost" id="openServiceManagementBtn" data-id="${p.id}">Manage Services →</button>` : ""}
 
         ${p.status === "Completed" ? `
         <div class="section-label" style="margin-top:22px;">AMC Plan Price</div>
@@ -5028,6 +5386,20 @@ function renderModal(){
       render();
       const p = state.projects.find(x=>x.id===projectId);
       await loadProductionUpdateImages(p);
+      render();
+    };
+  }
+  const openServiceManagementBtn = document.getElementById("openServiceManagementBtn");
+  if(openServiceManagementBtn){
+    openServiceManagementBtn.onclick = ()=>{
+      const projectId = openServiceManagementBtn.dataset.id;
+      state.editing = null;
+      document.getElementById("overlay").remove();
+      popEditHistoryIfNeeded();
+      state.screen = "serviceManagement";
+      state.serviceManagementProjectId = projectId;
+      state.openStageMenuServiceId = null;
+      state.showAddServiceModal = false;
       render();
     };
   }
@@ -5416,6 +5788,14 @@ document.getElementById("headerBack").addEventListener("click", ()=>{
     state.productionUpdatesProjectId = null;
     state.showAddServicePicker = false;
     state.pendingServiceForStage = null;
+    render();
+    return;
+  }
+  if(state.screen === "serviceManagement"){
+    state.screen = "main";
+    state.serviceManagementProjectId = null;
+    state.openStageMenuServiceId = null;
+    state.showAddServiceModal = false;
     render();
     return;
   }
