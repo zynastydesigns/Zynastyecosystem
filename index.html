@@ -360,6 +360,14 @@ async function updateClientProject(accessCode, updates){
 }
 
 const STAGES = ["In Discussion","Onboarding","Design Development","In Progress","Install & Styling","Completed"];
+
+// Client-facing label for a project stage — the internal stage name "In
+// Progress" reads as "Production" to clients, matching the language used
+// everywhere else in the client portal (Production Phase, Production
+// Updates, Service Progress). Every other stage displays as-is.
+function clientStatusLabel(status){
+  return status === "In Progress" ? "Production" : status;
+}
 const STAGE_COLORS = ["#B5654A","#C08A4E","#A9814F","#8C8F5E","#74845F","#5F7A56"];
 const STORAGE_KEY = "projects";
 const DESIGNERS_KEY = "designers";
@@ -590,7 +598,7 @@ function generateProductionAgreementPdf(project){
   doc.save((project.projectName||"Zynasty").replace(/[^a-z0-9]+/gi,"-") + "-Production-Stage-Agreement.pdf");
 }
 
-let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcView: "home", amcJustActivated: false, amcFormPreset: null, amcPlanPrice: 0, productionUpdateImages: {} };
+let state = { projects: [], loaded: false, clientCode: "", clientResult: null, clientError: "", clientQuotationPdf: null, clientFinalQuotationPdf: null, onboardingStep: null, designStep: null, productionStep: null, designers: [], clientView: "project", amcRequests: [], amcSelectedId: null, amcView: "home", amcJustActivated: false, amcFormPreset: null, amcPlanPrice: 0, productionUpdateImages: {}, serviceStageImages: {} };
 const AMC_KEY = "amc_requests";
 
 // Remembers which project this browser is currently looking at, so a reload
@@ -776,6 +784,7 @@ async function refreshCurrentProject(){
         state.clientFinalQuotationPdf = res2 && res2.value ? res2.value : null;
       }catch(e){ /* keep last known PDF on failure */ }
       await loadProductionUpdateImages(updated);
+      await loadServiceStageImages(updated);
     } else {
       state.clientResult = null;
     }
@@ -874,6 +883,22 @@ function renderServiceProgressForClient(p){
         <div style="font-size:11px;color:var(--slate);width:30px;text-align:right;">${pct}%</div>
       </div>
       <div style="font-size:12.5px;color:var(--ink-2);line-height:1.5;margin-top:10px;background:var(--paper-2);border-radius:10px;padding:10px 12px;">${escapeHtml(st.about)}</div>
+      ${svc.trackingLink ? `<a href="${escapeAttr(svc.trackingLink)}" target="_blank" rel="noopener" class="btn" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px;text-decoration:none;">📍 Track Shipment</a>` : ""}
+      ${(()=>{
+        const stageImgIds = (svc.stageImages && svc.stageImages[svc.stage]) || [];
+        if(!stageImgIds.length) return "";
+        return `<div style="margin-top:12px;">
+          <div style="font-size:11px;color:var(--slate);margin-bottom:6px;">Photos — ${escapeHtml(st.label)}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;">
+            ${stageImgIds.map(id=>{
+              const src = state.serviceStageImages[id];
+              return `<div style="aspect-ratio:1;border-radius:8px;overflow:hidden;background:#f4f2ee;border:1px solid var(--line);">
+                ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="window.open('${src}','_blank')">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--slate);">Loading…</div>`}
+              </div>`;
+            }).join("")}
+          </div>
+        </div>`;
+      })()}
     </div>`;
   }).join("");
   return `<div style="margin-top:14px;"><h3 style="font-family:'Fraunces',serif;font-size:18px;margin:0 0 10px;">Service Progress</h3>${cardsHtml}</div>`;
@@ -997,6 +1022,19 @@ async function loadProductionUpdateImages(p){
   if(!missing.length) return;
   const results = await Promise.all(missing.map(id=>window.storage.get("production-update-image:"+id, true).catch(()=>null)));
   results.forEach((res,i)=>{ if(res && res.value) state.productionUpdateImages[missing[i]] = res.value; });
+}
+
+// Same idea, for the per-stage photos the studio attaches to a Service
+// Management card (e.g. Quality Check / Dispatch photos on a Modular
+// Furniture service) — a client-side mirror of the same p.services array,
+// stored under their own "service-stage-image:" keys.
+async function loadServiceStageImages(p){
+  if(!p) return;
+  const allIds = (p.services||[]).flatMap(svc=>Object.values(svc.stageImages||{}).flat());
+  const missing = [...new Set(allIds)].filter(id=>!state.serviceStageImages[id]);
+  if(!missing.length) return;
+  const results = await Promise.all(missing.map(id=>window.storage.get("service-stage-image:"+id, true).catch(()=>null)));
+  results.forEach((res,i)=>{ if(res && res.value) state.serviceStageImages[missing[i]] = res.value; });
 }
 
 function renderProductionUpdatesForClient(p){
@@ -1126,7 +1164,7 @@ function renderRuler(stageIndex, large){
     const showLabel = large && i === idx;
     const dot = `<div class="tick ${cls}" style="left:${leftPct}%;${style}"></div>`;
     const edgeFix = i === 0 ? "transform:translateX(0);" : i === lastIdx ? "transform:translateX(-100%);" : "";
-    const label = showLabel ? `<div class="tick-label current-label" style="left:${leftPct}%;${edgeFix}">${s}</div>` : "";
+    const label = showLabel ? `<div class="tick-label current-label" style="left:${leftPct}%;${edgeFix}">${clientStatusLabel(s)}</div>` : "";
     return dot + label;
   }).join("");
   return `
@@ -1453,7 +1491,7 @@ function renderClient(){
       <div class="portal-grid">
         <div class="portal-box">
           <h3>Current Status</h3>
-          <div class="big">${p.status}</div>
+          <div class="big">${clientStatusLabel(p.status)}</div>
         </div>
         <div class="portal-box">
           <h3>Initial Quotation</h3>
@@ -1580,7 +1618,7 @@ function renderClient(){
           </div>
           <div class="portal-box">
             <h3>Current Status</h3>
-            <div class="big">${p.status}</div>
+            <div class="big">${clientStatusLabel(p.status)}</div>
           </div>
         </div>
 
@@ -1632,11 +1670,7 @@ function renderClient(){
       <div class="portal-grid">
         <div class="portal-box">
           <h3>Current Status</h3>
-          <div class="big">${p.status}</div>
-        </div>
-        <div class="portal-box">
-          <h3>Project Start</h3>
-          <div class="big">${fmtDate(p.targetCompletion)}</div>
+          <div class="big">${clientStatusLabel(p.status)}</div>
         </div>
         <div class="portal-box">
           <h3>Design Fee</h3>
@@ -1938,11 +1972,7 @@ function renderClient(){
       <div class="portal-grid">
         <div class="portal-box">
           <h3>Current Status</h3>
-          <div class="big">${p.status}</div>
-        </div>
-        <div class="portal-box">
-          <h3>Project Start</h3>
-          <div class="big">${fmtDate(p.targetCompletion)}</div>
+          <div class="big">${clientStatusLabel(p.status)}</div>
         </div>
         <div class="portal-box">
           <h3>Contract Value</h3>
@@ -2020,6 +2050,7 @@ async function lookupProjectByCode(code){
       state.clientFinalQuotationPdf = null;
     }
     await loadProductionUpdateImages(match);
+    await loadServiceStageImages(match);
     render();
     return true;
   } else {

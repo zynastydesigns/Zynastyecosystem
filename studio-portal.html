@@ -706,7 +706,7 @@ const DEFAULT_PRESETS = [
   { name: "Aluminium Concealed Handle", features: "6\" to 1'", cat: "Hardware", unit: "nos", rate: 300 }
 ];
 
-let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, showAddServicePicker: false, pendingServiceForStage: null, serviceManagementProjectId: null, openStageMenuServiceId: null, showAddServiceModal: false, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
+let state = { projects: [], loaded: false, search: "", filter: "all", section: "live", editing: null, toast: null, confirmDelete: null, screen: "main", quotationProjectId: null, quotation: null, itemPresets: null, presetsOrigin: "studio", showPresetPicker: false, presetPickerFilter: "", presetPickerRoomId: null, showRoomPicker: false, roomPickerName: "", designers: [], designersLoaded: false, editingDesigner: null, confirmDeleteDesigner: null, designStudioProjectId: null, designStudioTab: "threeD", designStudioImages: {}, quoteItemImages: {}, showDsRoomPicker: false, dsRoomPickerName: "", productionUpdatesProjectId: null, productionUpdateImages: {}, serviceStageImages: {}, showAddServicePicker: false, pendingServiceForStage: null, serviceManagementProjectId: null, openStageMenuServiceId: null, showAddServiceModal: false, amcRequests: [], amcRequestsLoaded: false, amcSelectedId: null, amcStatusFilter: "all", amcPlanPrice: 0, amcPlanPriceLoaded: false, quotationsSearch: "", quotationsStatusFilter: "all", quotationsSort: "recent" };
 
 // Pushes a history entry whenever a modal/overlay opens, so the
 // mobile/browser back gesture closes it instead of navigating the page
@@ -906,7 +906,7 @@ async function saveAmcPlanPrice(price){
   }
 }
 
-async function saveDesigners(excludeIds){
+async function saveDesigners(excludeIds, protectId){
   const excluded = new Set(excludeIds || []);
   try{
     // Same reasoning as saveProjects(): re-fetch the freshest copy and merge
@@ -915,7 +915,15 @@ async function saveDesigners(excludeIds){
     // another studio session) isn't silently undone by this save. A
     // designer just deleted by this same call (excludeIds) is never
     // re-added from the fresh copy, or the delete could be silently undone.
-    const protectedId = state.editingDesigner && state.editingDesigner !== "new" ? state.editingDesigner : null;
+    //
+    // protectId is passed explicitly by the add/edit-modal save path
+    // because by the time it calls saveDesigners(), state.editingDesigner
+    // has already been reset to null (so the modal closes immediately,
+    // without waiting on the network) — falling back to state.editingDesigner
+    // here would always resolve to null and the just-added/edited designer,
+    // not yet present in the fetched freshList, would get filtered straight
+    // back out below before the save even happens.
+    const protectedId = protectId || (state.editingDesigner && state.editingDesigner !== "new" ? state.editingDesigner : null);
     try{
       const res = await window.storage.get(DESIGNERS_KEY, true);
       const freshList = res && res.value ? JSON.parse(res.value) : null;
@@ -2043,6 +2051,7 @@ const SERVICE_TYPES = {
 };
 function ensureServices(p){
   if(!Array.isArray(p.services)) p.services = [];
+  p.services.forEach(svc=>{ if(!svc.stageImages || typeof svc.stageImages !== "object") svc.stageImages = {}; });
   return p.services;
 }
 function stagesForServiceType(type){ return (SERVICE_TYPES[type] || SERVICE_TYPES["modular-furniture"]).stages; }
@@ -2203,6 +2212,17 @@ async function loadProductionUpdateImages(p){
   if(!missing.length) return;
   const results = await Promise.all(missing.map(id=>window.storage.get("production-update-image:"+id, true).catch(()=>null)));
   results.forEach((res,i)=>{ if(res && res.value) state.productionUpdateImages[missing[i]] = res.value; });
+}
+
+// Same idea for the per-stage photos on a Service Management card.
+async function loadServiceStageImages(p){
+  if(!p) return;
+  const services = ensureServices(p);
+  const allIds = services.flatMap(svc=>Object.values(svc.stageImages||{}).flat());
+  const missing = [...new Set(allIds)].filter(id=>!state.serviceStageImages[id]);
+  if(!missing.length) return;
+  const results = await Promise.all(missing.map(id=>window.storage.get("service-stage-image:"+id, true).catch(()=>null)));
+  results.forEach((res,i)=>{ if(res && res.value) state.serviceStageImages[missing[i]] = res.value; });
 }
 
 function renderMaterialTile(u, m){
@@ -2561,7 +2581,37 @@ function renderServiceManagement(){
         <div style="font-size:11px;color:var(--slate);width:30px;text-align:right;">${pct}%</div>
       </div>
 
-      <div style="font-size:12px;color:var(--slate);">${escapeHtml(svc.designer || "Unassigned")}</div>
+      <div style="font-size:12px;color:var(--slate);margin-bottom:10px;">${escapeHtml(svc.designer || "Unassigned")}</div>
+
+      <div style="border-top:1px solid var(--line);padding-top:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div style="font-size:11px;color:var(--slate);">Photos — ${escapeHtml(st.label)} <span style="color:#b8b2a6;">(visible to client)</span></div>
+          <label class="btn ghost" style="font-size:11px;padding:4px 9px;cursor:pointer;">+ Add
+            <input type="file" accept="image/*" multiple class="svc-photo-input" data-service="${svc.id}" style="display:none;">
+          </label>
+        </div>
+        ${(()=>{
+          const ids = (svc.stageImages && svc.stageImages[svc.stage]) || [];
+          if(!ids.length) return `<div style="font-size:11.5px;color:#b8b2a6;">No photos for this stage yet.</div>`;
+          return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(56px,1fr));gap:6px;">
+            ${ids.map(id=>{
+              const src = state.serviceStageImages[id];
+              return `<div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;background:#f4f2ee;border:1px solid var(--line);">
+                ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">` : ""}
+                <button type="button" class="icon-btn svc-photo-remove" data-service="${svc.id}" data-img="${id}" style="position:absolute;top:2px;right:2px;width:18px;height:18px;font-size:10px;line-height:1;background:rgba(20,20,20,.65);color:#fff;border-radius:50%;">✕</button>
+              </div>`;
+            }).join("")}
+          </div>`;
+        })()}
+      </div>
+
+      <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px;">
+        <div style="font-size:11px;color:var(--slate);margin-bottom:6px;">Shipment Tracking Link <span style="color:#b8b2a6;">(Porter, courier, etc. — visible to client once set)</span></div>
+        <div style="display:flex;gap:6px;">
+          <input type="text" class="svc-tracking-input" data-service="${svc.id}" placeholder="https://track.porter.in/..." value="${escapeAttr(svc.trackingLink||"")}" style="flex:1;font-size:12.5px;">
+          <button type="button" class="btn ghost svc-tracking-save" data-service="${svc.id}" style="font-size:11px;padding:6px 10px;">Save</button>
+        </div>
+      </div>
     </div>`;
   }).join("");
 
@@ -2660,6 +2710,72 @@ function attachServiceManagementHandlers(){
       render();
       const ok = await updateStudioProject(p.id, { services: p.services });
       if(!ok) showToast("Could not save changes. Please try again.", true);
+    });
+  });
+
+  document.querySelectorAll(".svc-photo-input").forEach(inp=>{
+    inp.addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      if(!files.length) return;
+      const svc = services.find(s=>s.id===inp.dataset.service);
+      if(!svc) return;
+      if(!svc.stageImages || typeof svc.stageImages !== "object") svc.stageImages = {};
+      if(!Array.isArray(svc.stageImages[svc.stage])) svc.stageImages[svc.stage] = [];
+      showToast(`Uploading ${files.length} photo${files.length>1?"s":""}…`);
+      let uploaded = 0;
+      for(const file of files){
+        try{
+          const dataUrl = await compressImageFile(file);
+          const imgId = newProductionImageId();
+          const result = await window.storage.set("service-stage-image:"+imgId, dataUrl, true);
+          if(!result){ showToast("Could not upload a photo. Please try again.", true); continue; }
+          state.serviceStageImages[imgId] = dataUrl;
+          svc.stageImages[svc.stage].push(imgId);
+          uploaded++;
+        }catch(err){
+          console.error(err);
+          showToast("Could not upload a photo. Please try again.", true);
+        }
+      }
+      if(uploaded > 0){
+        const stageLabel = stagesForServiceType(svc.type)[stageIndexOf(svc.type, svc.stage)].label;
+        logActivity(p, "file", `Added ${uploaded} photo${uploaded>1?"s":""} to ${svc.name} — ${stageLabel}`);
+      }
+      render();
+      const ok = await updateStudioProject(p.id, { services: p.services, activityLog: p.activityLog });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+    });
+  });
+
+  document.querySelectorAll(".svc-photo-remove").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const svc = services.find(s=>s.id===btn.dataset.service);
+      if(!svc || !svc.stageImages) return;
+      const imgId = btn.dataset.img;
+      Object.keys(svc.stageImages).forEach(stageId=>{
+        svc.stageImages[stageId] = (svc.stageImages[stageId]||[]).filter(id=>id!==imgId);
+      });
+      render();
+      const ok = await updateStudioProject(p.id, { services: p.services });
+      if(!ok) showToast("Could not save changes. Please try again.", true);
+      try{ await window.storage.delete("service-stage-image:"+imgId, true); }catch(e){ /* ignore */ }
+    });
+  });
+
+  document.querySelectorAll(".svc-tracking-save").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const svc = services.find(s=>s.id===btn.dataset.service);
+      if(!svc) return;
+      const input = document.querySelector(`.svc-tracking-input[data-service="${svc.id}"]`);
+      const link = (input && input.value || "").trim();
+      svc.trackingLink = link;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "Saving…";
+      const ok = await updateStudioProject(p.id, { services: p.services });
+      btn.disabled = false;
+      btn.textContent = original;
+      showToast(ok ? (link ? "Tracking link saved. The client can see it now." : "Tracking link cleared.") : "Could not save. Please try again.", !ok);
     });
   });
 
@@ -4969,7 +5085,7 @@ function renderDesignerModal(){
     document.getElementById("designerOverlay").remove();
     render();
     popEditHistoryIfNeeded();
-    await saveDesigners();
+    await saveDesigners(null, updated.id);
   };
 }
 
@@ -5280,8 +5396,11 @@ function renderModal(){
           </div>
         </div>
 
-        <div class="section-label">Activity Log</div>
-        <div class="field-row">
+        <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span>Activity Log</span>
+          ${(p.activityLog && p.activityLog.length) ? `<button type="button" id="activityLogToggle" class="link-btn" style="text-transform:none;font-size:11.5px;">Show (${p.activityLog.length})</button>` : ""}
+        </div>
+        <div class="field-row" id="activityLogWrap" style="display:none;">
           <div class="field full" style="font-size:13px;">
             ${(p.activityLog && p.activityLog.length)
               ? [...p.activityLog].reverse().slice(0, 30).map(entry=>`<div style="padding:7px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:5px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
@@ -5303,6 +5422,15 @@ function renderModal(){
 
   document.getElementById("cancelBtn").onclick = ()=>{ closeEditSheetUI(); };
   document.getElementById("overlay").addEventListener("click",(e)=>{ if(e.target.id==="overlay"){ closeEditSheetUI(); }});
+  const activityLogToggle = document.getElementById("activityLogToggle");
+  if(activityLogToggle){
+    activityLogToggle.onclick = ()=>{
+      const wrap = document.getElementById("activityLogWrap");
+      const isOpen = wrap.style.display !== "none";
+      wrap.style.display = isOpen ? "none" : "";
+      activityLogToggle.textContent = (isOpen ? "Show (" : "Hide (") + (p.activityLog||[]).length + ")";
+    };
+  }
   const resetClientProgressBtn = document.getElementById("resetClientProgressBtn");
   if(resetClientProgressBtn){
     resetClientProgressBtn.onclick = async ()=>{
@@ -5413,7 +5541,7 @@ function renderModal(){
   }
   const openServiceManagementBtn = document.getElementById("openServiceManagementBtn");
   if(openServiceManagementBtn){
-    openServiceManagementBtn.onclick = ()=>{
+    openServiceManagementBtn.onclick = async ()=>{
       const projectId = openServiceManagementBtn.dataset.id;
       state.editing = null;
       document.getElementById("overlay").remove();
@@ -5422,6 +5550,9 @@ function renderModal(){
       state.serviceManagementProjectId = projectId;
       state.openStageMenuServiceId = null;
       state.showAddServiceModal = false;
+      render();
+      const p = state.projects.find(x=>x.id===projectId);
+      await loadServiceStageImages(p);
       render();
     };
   }
