@@ -262,6 +262,23 @@
   .picker-item:hover{background:var(--paper-2);}
   .picker-item .pd{font-size:13.5px;line-height:1.4;}
   .picker-item .pm{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--slate);white-space:nowrap;flex-shrink:0;}
+
+  /* ---- Production Phase stepper + step-transition animation ---- */
+  @keyframes stepFadeIn{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:translateY(0); } }
+  @keyframes nodePop{ 0%{ transform:scale(0.6); opacity:0; } 60%{ transform:scale(1.15); opacity:1; } 100%{ transform:scale(1); } }
+  @keyframes nodePulse{ 0%,100%{ box-shadow:0 0 0 4px var(--pulse-color,rgba(169,129,79,.18)); } 50%{ box-shadow:0 0 0 8px var(--pulse-color,rgba(169,129,79,.10)); } }
+  .prod-step-body{ animation:stepFadeIn .38s ease-out; }
+  .prod-stepper{ display:flex; align-items:flex-start; justify-content:space-between; position:relative; margin:4px 4px 22px; }
+  .prod-stepper::before{ content:""; position:absolute; top:14px; left:14px; right:14px; height:2px; background:var(--line); z-index:0; }
+  .prod-stepper .fill{ position:absolute; top:14px; left:14px; height:2px; background:var(--brass); z-index:1; transition:width .5s ease; }
+  .prod-stepper .node{ position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; gap:6px; flex:1; }
+  .prod-stepper .dot{ width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; border:2px solid var(--line); background:#fff; color:var(--slate); transition:border-color .3s, background .3s, color .3s; }
+  .prod-stepper .dot.done{ background:var(--brass); border-color:var(--brass); color:#fff; animation:nodePop .4s ease-out; }
+  .prod-stepper .dot.active{ border-color:var(--brass); color:var(--brass); animation:nodePulse 1.8s ease-in-out infinite; }
+  .prod-stepper .lbl{ font-size:10.5px; text-align:center; line-height:1.25; max-width:70px; color:var(--slate); }
+  .prod-stepper .node.active .lbl{ color:var(--ink); font-weight:700; }
+  .svc-node-check{ animation:nodePop .4s ease-out; }
+  .svc-node-active{ animation:nodePulse 1.8s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -825,11 +842,10 @@ function renderServiceProgressForClient(p){
     const fillPct = idx===0 ? 0 : (idx/(stages.length-1))*100;
     const nodesHtml = stages.map((s,i)=>`
       <div style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;">
-        <div style="width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
+        <div class="${i<idx ? 'svc-node-check' : (i===idx ? 'svc-node-active' : '')}" style="--pulse-color:${s.color}30;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
           background:${i<idx? s.color : (i===idx ? '#fff' : '#fff')};
           border:2px solid ${i<=idx ? s.color : 'var(--line)'};
-          color:${i<idx ? '#fff' : (i===idx ? s.color : 'var(--slate)')};
-          box-shadow:${i===idx ? `0 0 0 4px ${s.color}22` : 'none'};">${i<idx ? '✓' : (i===idx ? '●' : '')}</div>
+          color:${i<idx ? '#fff' : (i===idx ? s.color : 'var(--slate)')};">${i<idx ? '✓' : (i===idx ? '●' : '')}</div>
         <div style="font-size:10px;text-align:center;line-height:1.25;max-width:64px;color:${i===idx ? 'var(--ink)' : 'var(--slate)'};font-weight:${i===idx?700:400};">${escapeHtml(s.label)}</div>
       </div>`).join("");
     return `
@@ -861,6 +877,34 @@ function renderServiceProgressForClient(p){
     </div>`;
   }).join("");
   return `<div style="margin-top:14px;"><h3 style="font-family:'Fraunces',serif;font-size:18px;margin:0 0 10px;">Service Progress</h3>${cardsHtml}</div>`;
+}
+
+// Animated 4-node sub-stepper for the Production Phase wizard (Welcome →
+// Agreement → Quotation → Payment), styled to match the Service Progress
+// stepper above (filled connecting line, pop-in on completion, pulse on
+// the active node).
+const PROD_SUBSTEPS = [
+  { id: "transition", label: "Welcome" },
+  { id: "agreement",  label: "Agreement" },
+  { id: "quotation",  label: "Quotation" },
+  { id: "payment",    label: "Payment" }
+];
+function renderProductionSubstepper(prodStep){
+  const idx = Math.max(0, PROD_SUBSTEPS.findIndex(s=>s.id===prodStep));
+  const fillPct = idx===0 ? 0 : (idx/(PROD_SUBSTEPS.length-1))*100;
+  const nodesHtml = PROD_SUBSTEPS.map((s,i)=>{
+    const done = i < idx, active = i === idx;
+    return `
+    <div class="node${active?" active":""}">
+      <div class="dot${done?" done":""}${active?" active":""}">${done ? "✓" : (i+1)}</div>
+      <div class="lbl">${escapeHtml(s.label)}</div>
+    </div>`;
+  }).join("");
+  return `
+  <div class="prod-stepper">
+    <div class="fill" style="width:${fillPct}%;"></div>
+    ${nodesHtml}
+  </div>`;
 }
 
 
@@ -1755,6 +1799,7 @@ function renderClient(){
         state.productionStep = !p.productionAgreementAccepted ? "transition" : (!p.finalQuotationAccepted ? "quotation" : (p.productionCompleteAcknowledged ? "complete" : "payment"));
       }
       const prodStep = state.productionStep;
+      const prodSubstepperHtml = renderProductionSubstepper(prodStep);
 
       if(prodStep === "transition"){
         stepBodyHtml = `
@@ -1868,6 +1913,10 @@ function renderClient(){
           <div style="color:var(--slate);font-size:13.5px;max-width:420px;margin:0 auto;">Your production-stage payment has been received. Our team will be in touch as we move forward with manufacturing and installation.</div>
         </div>`;
       }
+      // Sub-stepper (Welcome → Agreement → Quotation → Payment) plus a fade/
+      // slide-in on the body itself, so moving between steps reads as a
+      // deliberate transition instead of the content just snapping in place.
+      stepBodyHtml = prodSubstepperHtml + `<div class="prod-step-body" key="${escapeAttr(prodStep)}">${stepBodyHtml}</div>`;
     } else {
       stepBodyHtml = `
       <div class="portal-box" style="padding:30px 26px;text-align:center;">

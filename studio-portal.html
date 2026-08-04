@@ -1387,12 +1387,13 @@ async function generateQuotationPdf(project, quotation){
   y = infoBoxTop + infoBoxH + 22;
 
   const columns = [
-    { label: "Item", frac: 0.14, align: "left" },
-    { label: "Specification", frac: 0.28, align: "left" },
-    { label: "Photo", frac: 0.10, align: "left" },
-    { label: "Qty", frac: 0.09, align: "right" },
-    { label: "Unit", frac: 0.08, align: "left" },
-    { label: "Rate", frac: 0.14, align: "right" },
+    { label: "Item", frac: 0.13, align: "left" },
+    { label: "Specification", frac: 0.21, align: "left" },
+    { label: "Dimensions", frac: 0.12, align: "left" },
+    { label: "Photo", frac: 0.09, align: "left" },
+    { label: "Qty", frac: 0.08, align: "right" },
+    { label: "Unit", frac: 0.07, align: "left" },
+    { label: "Rate", frac: 0.13, align: "right" },
     { label: "Amount", frac: 0.17, align: "right" }
   ];
   const tableWidth = pageWidth - margin*2;
@@ -1428,9 +1429,13 @@ async function generateQuotationPdf(project, quotation){
       if(it.brand) tagParts.unshift("Brand: " + it.brand);
       if(Number(it.itemDiscountPercent) > 0) tagParts.push("Item Discount: " + it.itemDiscountPercent + "%");
       const imageSrc = it.imageId ? state.quoteItemImages[it.imageId] : null;
+      const dimsText = (it.dimLength || it.dimSecondary)
+        ? (it.dimLength || "—") + " × " + (it.dimType === "H" ? "Height" : "Width") + " " + (it.dimSecondary || "—")
+        : "—";
       return [
         it.productName || "—",
         { main: it.features || "—", tag: tagParts.filter(Boolean).join("   ·   ") },
+        dimsText,
         { image: imageSrc, dims: it.imageId ? imageDims[it.imageId] : null },
         String(qty), it.unit, fmtMoneyPdf(it.rate), fmtMoneyPdf(amt)
       ];
@@ -3198,11 +3203,28 @@ function recalcItemRow(itemId){
   const isAuto = item.unit === "sqft" && item.dimLength !== "" && item.dimSecondary !== "";
   if(isAuto !== wasAuto){
     // Whether qty is auto-calculated (and the "= X sqft" hint) just changed —
-    // this is a structural DOM change, so a full render is unavoidable here.
-    // It happens once (when both dimension fields become filled), not on
-    // every keystroke, so it doesn't reproduce the reported bug.
-    render();
-    return;
+    // patch the two affected nodes in place instead of calling render().
+    // A full render() here was the actual cause of the reported bug: it
+    // replaces the whole DOM, so the field loses focus, the mobile numeric
+    // keypad dismisses, and the page visibly jumps/scrolls to the top —
+    // and on mobile this transition fires constantly (every time a dimension
+    // field goes from empty to non-empty, e.g. on the very first digit, or
+    // after a backspace), not just once.
+    if(qtyEl){
+      if(isAuto){ qtyEl.setAttribute("readonly",""); qtyEl.title = "Auto-calculated from dimensions"; }
+      else { qtyEl.removeAttribute("readonly"); qtyEl.removeAttribute("title"); }
+    }
+    const dimRow = card.querySelector(".dim-row");
+    let existingDimResult = card.querySelector(".dim-result");
+    if(isAuto){
+      if(!existingDimResult && dimRow){
+        existingDimResult = document.createElement("span");
+        existingDimResult.className = "dim-result";
+        dimRow.appendChild(existingDimResult);
+      }
+    } else if(existingDimResult){
+      existingDimResult.remove();
+    }
   }
 
   if(!isAuto && qtyEl){
