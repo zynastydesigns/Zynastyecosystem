@@ -498,16 +498,16 @@ function drawSignatureSealBlock(doc, x, y){
   doc.text("For Zynasty Design's", x, y);
   if(SIGNATURE_SEAL_DATA_URL){
     try{
-      const sigImgH = 52;
-      const sigImgW = sigImgH * (700 / 283); // source image aspect ratio
+      const sigImgH = 100;
+      const sigImgW = sigImgH * (620 / 584); // source image aspect ratio
       doc.addImage(SIGNATURE_SEAL_DATA_URL, "PNG", x, y + 6, sigImgW, sigImgH);
     }catch(e){ console.warn("Signature/seal image could not be embedded:", e); }
   }
   doc.setFont("helvetica","normal");
   doc.setFontSize(9);
   doc.setTextColor(90,90,90);
-  doc.text("Authorized Signatory", x, y + 70);
-  return y + 80;
+  doc.text("Authorized Signatory", x, y + 118);
+  return y + 128;
 }
 
 function generateAgreementPdf(project){
@@ -536,7 +536,7 @@ function generateAgreementPdf(project){
     doc.text(line, margin, y);
     y += lineHeight;
   });
-  if(y > pageHeight - margin - 120){ doc.addPage(); y = margin; }
+  if(y > pageHeight - margin - 170){ doc.addPage(); y = margin; }
   y += 20;
   doc.setFont("helvetica","italic");
   doc.setFontSize(11);
@@ -618,7 +618,7 @@ function generateProductionAgreementPdf(project){
     doc.text(line, margin, y);
     y += lineHeight;
   });
-  if(y > pageHeight - margin - 120){ doc.addPage(); y = margin; }
+  if(y > pageHeight - margin - 170){ doc.addPage(); y = margin; }
   y += 20;
   doc.setFont("helvetica","italic");
   doc.setFontSize(11);
