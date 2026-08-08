@@ -4437,6 +4437,45 @@ async function refreshProductionPaymentVerificationIfEditing(){
   attachProductionPaymentVerificationHandlers();
 }
 
+// The two read-only status lines showing whether the client has accepted
+// the Production Stage Agreement / Final Quotation yet. These aren't a
+// verification workflow like payments (nothing for studio to click), so
+// this only needs to re-render the text — no matching attach-handlers step.
+function productionAgreementStatusInnerHtml(p){
+  return `
+    <div class="field full" style="font-size:13px;color:${p.productionAgreementAccepted ? "#3a5c33" : "var(--slate)"};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <span>${p.productionAgreementAccepted ? `✓ Client has accepted the Production Stage Agreement on ${escapeHtml((p.productionAgreementAcceptedAt||"").slice(0,10))}.` : "Client has not yet accepted the Production Stage Agreement in the portal."}</span>
+      ${p.productionAgreementAccepted ? `<button type="button" class="btn ghost" id="downloadProductionAgreementBtn" data-id="${p.id}">Download Signed Agreement</button>` : ""}
+    </div>
+    <div class="field full" style="font-size:13px;color:${p.finalQuotationAccepted ? "#3a5c33" : "var(--slate)"};">
+      ${p.finalQuotationAccepted ? `✓ Client accepted the Final Quotation on ${escapeHtml((p.finalQuotationAcceptedAt||"").slice(0,10))}.` : "Client has not yet accepted the Final Quotation in the portal."}
+    </div>`;
+}
+async function refreshProductionAgreementStatusIfEditing(){
+  if(state.editing === null || state.editing === "new") return;
+  const panel = document.getElementById("productionAgreementStatusPanel");
+  if(!panel || panel.dataset.projectId !== state.editing) return;
+  let freshList;
+  try{
+    const res = await window.storage.get(STORAGE_KEY, true);
+    freshList = res && res.value ? JSON.parse(res.value) : null;
+  }catch(e){ return; }
+  if(!freshList) return;
+  const freshProject = freshList.find(x=>x.id===state.editing);
+  const localProject = state.projects.find(x=>x.id===state.editing);
+  if(!freshProject || !localProject) return;
+  const fields = ["productionAgreementAccepted","productionAgreementAcceptedAt","finalQuotationAccepted","finalQuotationAcceptedAt"];
+  const changed = fields.some(k=>freshProject[k] !== localProject[k]);
+  if(!changed) return;
+  fields.forEach(k=>{ localProject[k] = freshProject[k]; });
+  panel.innerHTML = productionAgreementStatusInnerHtml(localProject);
+  // downloadProductionAgreementBtn only appears once accepted; wire it up
+  // fresh in case this patch is what just made it appear.
+  const dlBtn = document.getElementById("downloadProductionAgreementBtn");
+  if(dlBtn) dlBtn.onclick = ()=>{ generateProductionAgreementPdf(localProject); };
+}
+
+
 function renderDesigners(){
   const list = state.designers || [];
   const toolbar = `
@@ -5039,16 +5078,8 @@ function renderModal(){
           <div class="field"><label>Production Payment Amount</label><input type="number" name="productionPaymentAmount" value="${escapeAttr(p.productionPaymentAmount)}" placeholder="${p.finalQuotation ? Math.round(Number(p.finalQuotation)*0.5) : 0} (default: 50% of final quotation)"></div>
         </div>
         <div style="margin-bottom:14px;"><button type="button" class="btn ghost" id="openQuoteBtnForFinal" data-id="${p.id}">Open Quotation Builder →</button></div>
-        <div class="field-row">
-          <div class="field full" style="font-size:13px;color:${p.productionAgreementAccepted ? "#3a5c33" : "var(--slate)"};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-            <span>${p.productionAgreementAccepted ? `✓ Client has accepted the Production Stage Agreement on ${escapeHtml((p.productionAgreementAcceptedAt||"").slice(0,10))}.` : "Client has not yet accepted the Production Stage Agreement in the portal."}</span>
-            ${p.productionAgreementAccepted ? `<button type="button" class="btn ghost" id="downloadProductionAgreementBtn" data-id="${p.id}">Download Signed Agreement</button>` : ""}
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field full" style="font-size:13px;color:${p.finalQuotationAccepted ? "#3a5c33" : "var(--slate)"};">
-            ${p.finalQuotationAccepted ? `✓ Client accepted the Final Quotation on ${escapeHtml((p.finalQuotationAcceptedAt||"").slice(0,10))}.` : "Client has not yet accepted the Final Quotation in the portal."}
-          </div>
+        <div class="field-row" id="productionAgreementStatusPanel" data-project-id="${p.id}">
+          ${productionAgreementStatusInnerHtml(p)}
         </div>
         <div class="section-label" style="margin-top:18px;">Production Stage Payment Verification</div>
         <div class="field-row">
@@ -5760,6 +5791,7 @@ async function refreshProjectsIfSafe(){
     // instead of only after closing and reopening the project.
     await refreshPaymentVerificationIfEditing();
     await refreshProductionPaymentVerificationIfEditing();
+    await refreshProductionAgreementStatusIfEditing();
     await refreshSiteMeasurementIfEditing();
     return;
   }

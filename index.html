@@ -737,6 +737,51 @@ function clearLocalProgressFlag(projectId, field){
   try{ localStorage.removeItem(localProgressFlagKey(projectId, field)); }catch(e){ /* ignore */ }
 }
 
+// Generic version of the same safety net, covering every field a client
+// save can touch — not just the handful (progressStep, materialSelection-
+// DownloadedAt, services, installationAgreement) that were manually wired
+// up above. This is what protects things like a payment proof submission
+// or an agreement/quotation acceptance from being silently reverted: if a
+// background poll's read lands before the server has caught up with a
+// just-completed save (slow backend, read-replica lag, or a poll racing
+// the save itself), the poll would otherwise overwrite the just-saved
+// value with the older one still sitting on the server — visibly
+// "un-submitting" a payment or "un-accepting" an agreement a minute
+// later, with no error shown anywhere. Uses its own key prefix so it
+// never collides with the specific flags above.
+function autoFieldFlagKey(projectId, field){
+  return "zynasty-client-autosave:" + projectId + ":" + field;
+}
+function setAutoFieldFlags(projectId, updates){
+  Object.keys(updates||{}).forEach(field=>{
+    try{ localStorage.setItem(autoFieldFlagKey(projectId, field), JSON.stringify(updates[field])); }catch(e){ /* ignore */ }
+  });
+}
+// Applied to a freshly-fetched project (e.g. in refreshCurrentProject):
+// for every field with a pending local flag, either clear the flag
+// (server now matches what was saved) or overwrite the fresh value with
+// the locally-saved one (server hasn't caught up yet).
+function reconcileAutoFieldFlags(project){
+  if(!project || !project.id) return;
+  const prefix = autoFieldFlagKey(project.id, "");
+  let keys;
+  try{ keys = Object.keys(localStorage); }catch(e){ return; }
+  keys.forEach(k=>{
+    if(k.indexOf(prefix) !== 0) return;
+    const field = k.slice(prefix.length);
+    let stored;
+    try{ stored = localStorage.getItem(k); }catch(e){ return; }
+    if(stored === null) return;
+    const freshJson = JSON.stringify(project[field] === undefined ? null : project[field]);
+    if(freshJson === stored){
+      try{ localStorage.removeItem(k); }catch(e){ /* server has caught up */ }
+    } else {
+      try{ project[field] = JSON.parse(stored); }catch(e){ /* corrupt flag — leave the fresh server value alone */ }
+    }
+  });
+}
+
+
 async function loadProjects(){
   try{
     const res = await window.storage.get(STORAGE_KEY, true);
@@ -928,6 +973,14 @@ async function refreshCurrentProject(){
           }
         }
       }
+      // Generic catch-all — covers payment proof submissions, agreement/
+      // quotation acceptances, KYC, and site-visit/material-slot bookings,
+      // none of which had this protection before. This is what the studio
+      // side "client hasn't submitted/accepted yet" desync in practice
+      // traces back to: the client's save had gone through, but a poll's
+      // read landed on a still-stale server copy first and silently
+      // reverted the local UI back to unsubmitted/unaccepted.
+      reconcileAutoFieldFlags(updated);
       state.clientResult = updated;
       try{
         const res = await window.storage.get("quotation-pdf:" + updated.id, true);
@@ -2920,6 +2973,9 @@ function attachClientHandlers(){
   // older copy and reverts the local UI. Whatever the exact reason (a
   // slower read path, a cache layer, etc.), this window covers it.
   async function saveClientProject(p, updates){
+    // Protect every field in this save, not just the handful wired up
+    // individually elsewhere — see reconcileAutoFieldFlags for why.
+    setAutoFieldFlags(p.id, updates);
     state.pendingSaves = (state.pendingSaves || 0) + 1;
     try{
       const ok = await updateClientProject(p.accessCode, updates);
@@ -3118,6 +3174,11 @@ function attachClientHandlers(){
       p.lostAt = "";
       updateClientProject(p.accessCode, { status: p.status, reconsideredAt: p.reconsideredAt, lostAt: p.lostAt })
         .then(ok=>{ if(!ok) console.error("Could not save status change"); });
+      // This call bypasses saveClientProject() (fire-and-forget, no
+      // pendingSaves tracking needed here since the page moves off this
+      // screen immediately) — set the same auto-protect flags directly so
+      // this status change gets the same protection as every other save.
+      setAutoFieldFlags(p.id, { status: p.status, reconsideredAt: p.reconsideredAt, lostAt: p.lostAt });
       render();
     };
   }
