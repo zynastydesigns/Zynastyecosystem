@@ -2058,10 +2058,21 @@ const SERVICE_TYPES = {
       { id:"sourcing",      label:"Sourcing",       color:"#A9814F", about:"We're sourcing the materials and components for this service." },
       { id:"quality",       label:"Quality Check",  color:"#7D6B96", about:"Everything is being inspected against spec before moving on." },
       { id:"manufacturing", label:"Manufacturing",  color:"#3E6E96", about:"Your items are in production, built with precision and care." },
-      { id:"dispatch",      label:"Dispatch",       color:"#6E7D5E", about:"Ready and being dispatched to the project site." },
+      { id:"dispatch",      label:"Dispatch",       color:"#6E7D5E", about:"Ready and being dispatched to the project site — tracking link becomes available here." },
+      { id:"materialDelivery", label:"Material Delivery", color:"#5C7A99", about:"Materials have arrived at the project site, pending the client's confirmation of receipt." },
     ]
   }
 };
+// Only stages from "dispatch" onward involve a physical shipment to track —
+// used to gate the Shipment Tracking Link panel and the client's "Track
+// Shipment" button so both only appear once a service actually reaches
+// Dispatch (part of the Dispatch → Track Shipment → Material Delivery flow).
+function stageIsDispatchOrLater(type, stageId){
+  const stages = stagesForServiceType(type);
+  const dispatchIdx = stages.findIndex(s=>s.id==="dispatch");
+  const idx = stages.findIndex(s=>s.id===stageId);
+  return dispatchIdx !== -1 && idx >= dispatchIdx;
+}
 function ensureServices(p){
   if(!Array.isArray(p.services)) p.services = [];
   p.services.forEach(svc=>{
@@ -2216,13 +2227,28 @@ function renderServiceManagement(){
         })()}
       </div>
 
+      ${stageIsDispatchOrLater(svc.type, svc.stage) ? `
       <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px;">
-        <div style="font-size:11px;color:var(--slate);margin-bottom:6px;">Shipment Tracking Link <span style="color:#b8b2a6;">(Porter, courier, etc. — visible to client once set)</span></div>
+        <div style="font-size:11px;color:var(--slate);margin-bottom:6px;">Shipment Tracking Link <span style="color:#b8b2a6;">(Porter, courier, etc. — visible to client from Dispatch onward)</span></div>
         <div style="display:flex;gap:6px;">
           <input type="text" class="svc-tracking-input" data-service="${svc.id}" placeholder="https://track.porter.in/..." value="${escapeAttr(svc.trackingLink||"")}" style="flex:1;font-size:12.5px;">
           <button type="button" class="btn ghost svc-tracking-save" data-service="${svc.id}" style="font-size:11px;padding:6px 10px;">Save</button>
         </div>
-      </div>
+      </div>` : ""}
+
+      ${svc.stage === "materialDelivery" ? `
+      <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px;">
+        <div style="font-size:11px;color:var(--slate);margin-bottom:6px;">Material Delivery <span style="color:#b8b2a6;">(upload proof above, then mark delivered — client can only acknowledge, never edit)</span></div>
+        ${svc.deliveredToSiteAt ? `
+          <div style="padding:9px 11px;background:#eef4ec;border:1px solid #b9d3b1;border-radius:8px;font-size:12px;color:#3a5c33;margin-bottom:8px;">✓ Marked Delivered to Site on ${escapeHtml(fmtDate((svc.deliveredToSiteAt||"").slice(0,10)))}</div>
+          ${svc.clientAcceptedDeliveryAt
+            ? `<div style="padding:9px 11px;background:#eef4ec;border:1px solid #b9d3b1;border-radius:8px;font-size:12px;color:#3a5c33;">✓ Client confirmed receipt on ${escapeHtml(fmtDate((svc.clientAcceptedDeliveryAt||"").slice(0,10)))}</div>`
+            : `<div style="padding:9px 11px;background:#fbf3df;border:1px solid #e4cf9c;border-radius:8px;font-size:12px;color:#8a6d1f;">⏳ Awaiting client confirmation of receipt.</div>`}
+        ` : `
+          <div style="font-size:11.5px;color:#b8b2a6;margin-bottom:8px;">Not yet marked delivered. Add a delivery photo above, then mark it delivered — the client will see the photo and a "Confirm Material Received" button.</div>
+          <button type="button" class="btn svc-mark-delivered" data-service="${svc.id}" style="font-size:12px;padding:7px 12px;">Mark Delivered to Site</button>
+        `}
+      </div>` : ""}
     </div>`;
   }).join("");
 
@@ -2449,6 +2475,34 @@ function attachServiceManagementHandlers(){
       btn.disabled = false;
       btn.textContent = original;
       showToast(ok ? (link ? "Tracking link saved. The client can see it now." : "Tracking link cleared.") : "Could not save. Please try again.", !ok);
+    });
+  });
+
+  // Studio/Admin marks the material delivered — this is the only side that
+  // can do this; the client can only acknowledge once this is set (see
+  // renderMaterialDeliveryForClient in the Client Portal). Upload the
+  // delivery photo first via the Photos panel above (already generic per
+  // stage, nothing new needed there), then mark delivered.
+  document.querySelectorAll(".svc-mark-delivered").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const svc = services.find(s=>s.id===btn.dataset.service);
+      if(!svc || svc.deliveredToSiteAt) return;
+      const stageIds = (svc.stageImages && svc.stageImages[svc.stage]) || [];
+      if(!stageIds.length && !confirm("No delivery photo has been uploaded for this stage yet. Mark as delivered anyway?")) return;
+      const prevDeliveredAt = svc.deliveredToSiteAt, prevUpdated = svc.updatedAt;
+      svc.deliveredToSiteAt = new Date().toISOString();
+      svc.updatedAt = svc.deliveredToSiteAt;
+      logActivity(p, "phase", `${svc.name} marked Delivered to Site`);
+      render();
+      const ok = await updateStudioProject(p.id, { services: p.services, activityLog: p.activityLog });
+      if(!ok){
+        svc.deliveredToSiteAt = prevDeliveredAt;
+        svc.updatedAt = prevUpdated;
+        render();
+        showToast("Could not save — reverted. Please try again.", true);
+      } else {
+        showToast(`${svc.name} marked Delivered to Site.`);
+      }
     });
   });
 
@@ -5665,6 +5719,30 @@ async function refreshProjectsIfSafe(){
       if(fresh) state.amcRequests = fresh;
     }catch(e){ /* keep last known data on failure */ }
     render();
+    return;
+  }
+  if(state.screen === "serviceManagement"){
+    // Live-patch the services array in place while this screen is open, so
+    // a client's material approval/disapproval or delivery confirmation
+    // shows up here without needing to leave and reopen the project — same
+    // reasoning as the Payment Verification live-patch above. Only the
+    // services field is touched, so nothing the studio user is mid-editing
+    // (a draft tracking link, an open stage menu) gets wiped.
+    const trackingInputFocused = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("svc-tracking-input");
+    if(trackingInputFocused) return;
+    let fresh;
+    try{
+      const res = await window.storage.get(STORAGE_KEY, true);
+      fresh = res && res.value ? JSON.parse(res.value) : null;
+    }catch(e){ return; }
+    if(!fresh) return;
+    const freshProject = fresh.find(x=>x.id===state.serviceManagementProjectId);
+    const localProject = state.projects.find(x=>x.id===state.serviceManagementProjectId);
+    if(!freshProject || !localProject) return;
+    if(JSON.stringify(freshProject.services||[]) !== JSON.stringify(localProject.services||[])){
+      localProject.services = freshProject.services;
+      render();
+    }
     return;
   }
   if(state.screen !== "main") return;
