@@ -5109,20 +5109,6 @@ function renderModal(){
       const ok = await updateStudioProject(p.id, { progressStep: "", activityLog: p.activityLog });
       if(!ok){
         showToast("Could not save changes. Please try again.", true);
-      } else {
-        // DIAGNOSTIC: re-fetch the raw record straight from the database
-        // (not our own in-memory copy) to confirm the reset actually
-        // persisted, rather than assuming success just because the RPC
-        // call returned OK.
-        try{
-          const res = await window.storage.get(STORAGE_KEY);
-          const freshList = res && res.value ? JSON.parse(res.value) : null;
-          const freshProject = freshList && freshList.find(x=>x.id===p.id);
-          console.log("[diagnostic] progressStep in database right after reset:", freshProject ? JSON.stringify(freshProject.progressStep) : "(project not found)");
-          if(freshProject && freshProject.progressStep){
-            showToast(`Diagnostic: the RPC reported success, but the database still shows progressStep="${freshProject.progressStep}" immediately afterward. The reset did not actually persist.`, true);
-          }
-        }catch(err){ console.error("[diagnostic] verification fetch failed", err); }
       }
       resetClientProgressBtn.disabled = false;
       resetClientProgressBtn.textContent = "↺ Reset Client to Site Measurement";

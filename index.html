@@ -786,10 +786,26 @@ async function refreshCurrentProject(){
   if(state.clientResult){
     const updated = state.projects.find(p=>p.id===state.clientResult.id);
     if(updated){
+      // The update_client_project RPC doesn't reliably persist progressStep,
+      // so a local flag (set the moment the client advances) is the source
+      // of truth until the server catches up with the same value — same
+      // fallback pattern as materialSelectionDownloadedAt below. Without
+      // this, a background poll reading a stale/un-updated server row would
+      // silently revert the wizard to an earlier step a few seconds after
+      // the client moved forward.
+      const localStepFlag = getLocalProgressFlag(updated.id, "progressStep");
+      if(localStepFlag){
+        if(updated.progressStep === localStepFlag){
+          clearLocalProgressFlag(updated.id, "progressStep"); // server has caught up
+        } else {
+          updated.progressStep = localStepFlag; // keep showing the local value until it does
+        }
+      }
       if(updated.progressStep !== state.clientResult.progressStep){
-        // Studio moved the project's phase — re-derive which wizard step to
-        // show from the fresh data instead of keeping whatever step this
-        // already-open tab happened to be on.
+        // Studio moved the project's phase (or the local flag above just
+        // did) — re-derive which wizard step to show from the fresh data
+        // instead of keeping whatever step this already-open tab happened
+        // to be on.
         state.designStep = null;
         state.productionStep = null;
         const newStep = updated.progressStep || "siteVisit";
@@ -2724,25 +2740,6 @@ function attachClientHandlers(){
     }
   }
 
-  // DIAGNOSTIC: re-fetches the raw project record straight from the
-  // database (not our own in-memory copy) right after saving progressStep,
-  // to confirm whether the RPC actually persisted it or silently dropped
-  // it — the same technique that previously proved materialSelectionDownloadedAt
-  // wasn't in the update_client_project allow-list. If progressStep has the
-  // same issue, this is why the wizard was reverting to Site Measurement on
-  // the next background poll: the server never actually had the newer step.
-  async function verifyProgressStepPersisted(projectId, expectedStep, buttonEl){
-    try{
-      const res = await window.storage.get(STORAGE_KEY, true);
-      const freshList = res && res.value ? JSON.parse(res.value) : null;
-      const freshProject = freshList && freshList.find(x=>x.id===projectId);
-      console.log("[diagnostic] progressStep in database right after save:", freshProject ? JSON.stringify(freshProject.progressStep) : "(project not found)", "— expected:", expectedStep);
-      if(freshProject && freshProject.progressStep !== expectedStep){
-        alert(`Diagnostic: this step change was NOT saved to the database. The server still shows progressStep="${freshProject.progressStep}" instead of "${expectedStep}". This confirms progressStep is being silently rejected by the update_client_project function — most likely it's missing from that function's allowed field list. This is why the page reverts to an earlier step after a few seconds.`);
-      }
-    }catch(err){ console.error("[diagnostic] verification fetch failed", err); }
-  }
-
   const siteVisitForm = document.getElementById("siteVisitForm");
   if(siteVisitForm){
     siteVisitForm.onsubmit = async (e)=>{
@@ -2776,9 +2773,13 @@ function attachClientHandlers(){
     siteVisitNextBtn.onclick = async ()=>{
       const p = state.clientResult;
       p.progressStep = "renders";
+      // Set the local backup first, mirroring the materialSelectionDownloadedAt
+      // pattern below — the update_client_project RPC doesn't reliably persist
+      // progressStep, so this is what keeps the wizard on this step instead of
+      // reverting to Site Measurement on the next background refresh.
+      setLocalProgressFlag(p.id, "progressStep", p.progressStep);
       render();
-      const ok = await saveClientProject(p, { progressStep: p.progressStep });
-      await verifyProgressStepPersisted(p.id, "renders", siteVisitNextBtn);
+      await saveClientProject(p, { progressStep: p.progressStep });
     };
   }
   const downloadRendersBtn = document.getElementById("downloadRendersBtn");
@@ -2790,9 +2791,9 @@ function attachClientHandlers(){
     rendersNextBtn.onclick = async ()=>{
       const p = state.clientResult;
       p.progressStep = "material";
+      setLocalProgressFlag(p.id, "progressStep", p.progressStep);
       render();
-      const ok = await saveClientProject(p, { progressStep: p.progressStep });
-      await verifyProgressStepPersisted(p.id, "material", rendersNextBtn);
+      await saveClientProject(p, { progressStep: p.progressStep });
     };
   }
   const downloadMaterialBtn = document.getElementById("downloadMaterialBtn");
@@ -2820,6 +2821,7 @@ function attachClientHandlers(){
     materialNextBtn.onclick = async ()=>{
       const p = state.clientResult;
       p.progressStep = "production";
+      setLocalProgressFlag(p.id, "progressStep", p.progressStep);
       state.productionStep = "transition";
       render();
       await saveClientProject(p, { progressStep: p.progressStep });
