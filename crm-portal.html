@@ -1735,7 +1735,10 @@
   // portal access code, so leads converted here look the same as projects
   // added directly in Studio Portal.
   function genAccessCode(){
-    return "PRJ-" + Math.floor(100 + Math.random() * 900);
+    // Matches the widened format in Studio Portal's genCode() — 6 digits
+    // instead of 3, since this code doubles as the client's only login
+    // credential (no password). See genCode() in studio-portal.html.
+    return "PRJ-" + Math.floor(100000 + Math.random() * 900000);
   }
 
   // Where the Studio Portal app lives, relative to this file — update this
@@ -2135,7 +2138,15 @@
   // any not-yet-linked "In Discussion" projects into the Hot column, and
   // renders — keeping everything in sync automatically on a timer.
   async function refreshLeadsData(){
+    // Same class of race fixed in Client Portal (progressStep/services): a
+    // drag/dropdown move in moveLeadToStage() saves in the background, and
+    // if this poll's read lands before the server catches up with that
+    // save, overwriting currentLeads here would visibly snap the card back
+    // to its previous column. Skip the overwrite while any move is still
+    // in flight; the poll after it lands will pick up the confirmed state.
+    if(movingLeadIds.size > 0) return;
     const [leads, projects] = await Promise.all([fetchLeads(), fetchProjects()]);
+    if(movingLeadIds.size > 0) return; // a move started while this fetch was in flight
     if(leads === null && !currentLeads.length){
       leadsBoard.innerHTML = '<div class="lead-empty">Couldn\'t load leads right now.</div>';
       return;

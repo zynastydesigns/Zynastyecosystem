@@ -981,7 +981,12 @@ async function saveItemPresets(){
 
 function genCode(name){
   const letters = (name||"PRJ").replace(/[^a-zA-Z]/g,"").toUpperCase().slice(0,3).padEnd(3,"X");
-  const num = Math.floor(100 + Math.random()*900);
+  // 6 digits (100000–999999) instead of the previous 3 (100–999) — the
+  // access code is the client's only login credential (no password), so
+  // widening it from ~900 to ~900,000 possibilities makes it meaningfully
+  // harder to guess/brute-force while staying just as easy to read out or
+  // type as before.
+  const num = Math.floor(100000 + Math.random()*900000);
   return letters + "-" + num;
 }
 // Regenerates genCode() until it lands on an access code not already used by
